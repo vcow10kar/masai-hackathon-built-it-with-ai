@@ -1,10 +1,13 @@
 import "server-only";
 
 import { execFile } from "node:child_process";
+import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { promisify } from "node:util";
 import { join } from "node:path";
 import type { Lecture } from "./store";
 import type { TranscriptSegment } from "./types";
+import { mergeSegments, parseVtt } from "./vtt";
 
 const run = promisify(execFile);
 
@@ -28,33 +31,6 @@ async function fetchMetadata(url: string) {
   } catch {
     return { title: "Untitled lecture", uploader: "Unknown" };
   }
-}
-
-/**
- * Caption cues are a few words long, which is too small to retrieve over.
- * Merges them into passages big enough to answer from, keeping the start time
- * of the first cue since that is what the player seeks to.
- */
-function mergeSegments(
-  segments: Array<{ start: number; end: number; text: string }>,
-  { maxSeconds = 45, maxChars = 700 } = {},
-): TranscriptSegment[] {
-  const merged: Array<{ start: number; end: number; text: string }> = [];
-
-  for (const segment of segments) {
-    const current = merged[merged.length - 1];
-    const wouldRun = current ? segment.end - current.start : 0;
-    const wouldLength = current ? current.text.length + segment.text.length + 1 : 0;
-
-    if (current && wouldRun <= maxSeconds && wouldLength <= maxChars) {
-      current.end = segment.end;
-      current.text = `${current.text} ${segment.text}`.trim();
-    } else {
-      merged.push({ ...segment });
-    }
-  }
-
-  return merged.map((segment, index) => ({ id: `s${index + 1}`, ...segment }));
 }
 
 /** Fetches captions over HTTP, which is the only path that works when deployed. */
@@ -94,16 +70,73 @@ async function fetchHostedTranscript(videoId: string, apiKey: string) {
   return mergeSegments(cues);
 }
 
-/** Runs the local ingest script, which needs yt-dlp on the machine. */
+/**
+ * Fetches captions with yt-dlp into a temporary directory. Nothing is written
+ * inside the project: the transcript's home is the store, not the repository.
+ */
 async function fetchLocalTranscript(videoId: string, url: string) {
-  await run("node", [join(process.cwd(), "scripts", "ingest.mjs"), url], {
-    timeout: 280_000,
-    maxBuffer: 64 * 1024 * 1024,
-  });
+  const workDir = await mkdtemp(join(tmpdir(), "ask-the-lecture-"));
 
-  const { readFile } = await import("node:fs/promises");
-  const raw = await readFile(join(process.cwd(), "data", "lectures", `${videoId}.json`), "utf8");
-  return (JSON.parse(raw) as Lecture).segments;
+  try {
+    try {
+      await run("yt-dlp", [
+        "--skip-download",
+        "--write-subs",
+        "--write-auto-subs",
+        // Narrow list on purpose: "en.*" also pulls machine translations of
+        // other languages, which are slower, rate limited, and worse.
+        "--sub-langs", "en,en-US,en-GB,en-orig",
+        "--sub-format", "vtt",
+        "--no-warnings",
+        "-o", join(workDir, "%(id)s"),
+        url,
+      ], { timeout: 120_000, maxBuffer: 64 * 1024 * 1024 });
+    } catch {
+      // A missing or rate limited language is not fatal as long as one of the
+      // requested tracks reached the directory.
+    }
+
+    // Manually written captions sort ahead of auto-generated ones.
+    const files = (await readdir(workDir))
+      .filter((name) => name.endsWith(".vtt"))
+      .sort((a, b) => Number(a.includes("auto")) - Number(b.includes("auto")));
+
+    if (files.length === 0) return null;
+
+    const cues = parseVtt(await readFile(join(workDir, files[0]), "utf8"));
+    return cues.length > 0 ? mergeSegments(cues) : null;
+  } finally {
+    await rm(workDir, { recursive: true, force: true });
+  }
+}
+
+/** Transcribes the audio locally with whisper.cpp, for videos without captions. */
+async function fetchWhisperTranscript(url: string) {
+  const model = process.env.WHISPER_MODEL ?? "small.en";
+  const modelPath = join(process.cwd(), "models", `ggml-${model}.bin`);
+  const workDir = await mkdtemp(join(tmpdir(), "ask-the-lecture-whisper-"));
+
+  try {
+    await run("yt-dlp", [
+      "-x",
+      "--audio-format", "wav",
+      "--postprocessor-args", "-ar 16000 -ac 1",
+      "--no-warnings",
+      "-o", join(workDir, "audio.%(ext)s"),
+      url,
+    ], { timeout: 600_000, maxBuffer: 64 * 1024 * 1024 });
+
+    await run("whisper-cli", [
+      "-m", modelPath,
+      "-f", join(workDir, "audio.wav"),
+      "-ovtt",
+      "-of", join(workDir, "whisper"),
+    ], { timeout: 1_800_000, maxBuffer: 64 * 1024 * 1024 });
+
+    return mergeSegments(parseVtt(await readFile(join(workDir, "whisper.vtt"), "utf8")));
+  } finally {
+    await rm(workDir, { recursive: true, force: true });
+  }
 }
 
 /**
@@ -121,12 +154,21 @@ export async function buildLecture(
   const metadata = await fetchMetadata(url);
 
   let segments: TranscriptSegment[];
+  let source: Lecture["source"] = "captions";
   if (apiKey) {
     onProgress("Fetching the captions");
     segments = await fetchHostedTranscript(videoId, apiKey);
   } else {
     onProgress("Fetching the captions locally");
-    segments = await fetchLocalTranscript(videoId, url);
+    const captions = await fetchLocalTranscript(videoId, url);
+
+    if (captions) {
+      segments = captions;
+    } else {
+      onProgress("No captions published, transcribing the audio");
+      segments = await fetchWhisperTranscript(url);
+      source = "whisper";
+    }
   }
 
   onProgress(`Prepared ${segments.length} passages`);
@@ -137,7 +179,7 @@ export async function buildLecture(
     uploader: metadata.uploader,
     url,
     durationSeconds: Math.round(segments[segments.length - 1]?.end ?? 0),
-    source: "captions",
+    source,
     ingestedAt: new Date().toISOString(),
     segments,
   };

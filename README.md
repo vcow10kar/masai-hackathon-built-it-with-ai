@@ -56,7 +56,7 @@ Model ids are overridable with `OPENROUTER_MODEL`, `ANTHROPIC_MODEL` and
 | --- | --- |
 | Supadata transcript API | `SUPADATA_API_KEY` is set. The only option that works when deployed. |
 | `yt-dlp` | no key set. Needs the binary, so local only. |
-| `whisper.cpp` (`ggml-small.en`) | a video publishes no captions. Local only. |
+| `whisper.cpp` (`ggml-small.en`) | a video publishes no captions and no key is set. Local only. |
 
 ### Storage
 
@@ -102,13 +102,15 @@ For the Supabase-backed path, run `supabase/schema.sql` once in the Supabase
 SQL editor, then set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`. The
 service role key bypasses row-level security, so it must stay server-side.
 
-### Optional command line ingest
+Ingestion happens entirely through the UI. Transcripts are written to the
+configured store, never into the repository; `data/lectures/` is only a local
+cache used when Supabase is not configured, and is ignored by git.
 
-The UI does this itself; the script is for loading several lectures at once.
+For videos that publish no captions, the local Whisper fallback needs its model
+once:
 
 ```bash
-npm run ingest -- "https://www.youtube.com/watch?v=..."
-npm run whisper:model small.en    # only for videos without captions
+npm run whisper:model small.en
 ```
 
 ## Project layout
@@ -117,7 +119,7 @@ npm run whisper:model small.en    # only for videos without captions
 src/app/            routes and pages
 src/components/     player, transcript panel, chat, URL bar
 src/lib/            retrieval, answering, storage, transcripts, parsing
-scripts/            command line ingest and model download
+scripts/            Whisper model download
 supabase/schema.sql the lectures table
 ```
 

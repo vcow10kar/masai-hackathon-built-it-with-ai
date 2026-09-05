@@ -7,7 +7,6 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "ingest": "node scripts/ingest.mjs",
     "whisper:model": "node scripts/fetch-whisper-model.mjs"
   },
   "dependencies": {

@@ -1,14 +1,18 @@
+import type { TranscriptSegment } from "./types";
+
+export type Cue = { start: number; end: number; text: string };
+
 /** Parsing for WebVTT caption files, including YouTube's rolling auto-captions. */
 
 const TIMING = /^((?:\d+:)?\d{2}:\d{2}[.,]\d{3})\s+-->\s+((?:\d+:)?\d{2}:\d{2}[.,]\d{3})/;
 
-function toSeconds(stamp) {
+function toSeconds(stamp: string): number {
   const parts = stamp.replace(",", ".").split(":").map(Number);
   return parts.reduce((total, part) => total * 60 + part, 0);
 }
 
 /** Strips karaoke timing tags and cue tags that auto-captions embed. */
-function cleanCueText(raw) {
+function cleanCueText(raw: string): string {
   return raw
     .replace(/<\d{2}:\d{2}:\d{2}[.,]\d{3}>/g, "")
     .replace(/<[^>]*>/g, "")
@@ -27,17 +31,17 @@ function cleanCueText(raw) {
  * next cue so text scrolls on screen. Keeping only lines not already carried
  * over turns that back into a clean, non-duplicated transcript.
  */
-export function parseVtt(content) {
+export function parseVtt(content: string): Cue[] {
   const blocks = content.replace(/\r/g, "").split("\n\n");
-  const segments = [];
-  let carried = [];
+  const segments: Cue[] = [];
+  let carried: string[] = [];
 
   for (const block of blocks) {
     const lines = block.split("\n");
     const timingIndex = lines.findIndex((line) => TIMING.test(line));
     if (timingIndex === -1) continue;
 
-    const [, startStamp, endStamp] = lines[timingIndex].match(TIMING);
+    const [, startStamp, endStamp] = lines[timingIndex].match(TIMING)!;
     const cueLines = lines
       .slice(timingIndex + 1)
       .map(cleanCueText)
@@ -71,8 +75,11 @@ export function parseVtt(content) {
  * Merges them into passages that are big enough to answer from while keeping
  * the start time of the first cue, since that is what the player seeks to.
  */
-export function mergeSegments(segments, { maxSeconds = 45, maxChars = 700 } = {}) {
-  const merged = [];
+export function mergeSegments(
+  segments: Cue[],
+  { maxSeconds = 45, maxChars = 700 } = {},
+): TranscriptSegment[] {
+  const merged: Cue[] = [];
 
   for (const segment of segments) {
     const current = merged[merged.length - 1];
