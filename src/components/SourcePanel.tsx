@@ -37,7 +37,13 @@ export function SourcePanel({ transcript, notes, activeSegmentId, onSeek }: Prop
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-2">
-        {tab === "transcript" ? (
+        {tab === "transcript" && transcript.length === 0 ? (
+          <p className="p-2 text-sm text-black/50 dark:text-white/50">
+            No transcript loaded. Ingest one with{" "}
+            <code className="font-mono text-xs">npm run ingest -- &lt;video url&gt;</code>, then
+            open it from the library.
+          </p>
+        ) : tab === "transcript" ? (
           <ul className="flex flex-col gap-0.5">
             {transcript.map((segment) => (
               <li key={segment.id}>
