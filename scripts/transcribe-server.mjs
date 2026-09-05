@@ -13,13 +13,20 @@
 import { createServer } from "node:http";
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { mergeSegments, parseVtt } from "../src/lib/vtt.ts";
 
 const run = promisify(execFile);
+
+const started = Date.now();
+const since = () => `${((Date.now() - started) / 1000).toFixed(0)}s`;
+
+function log(...parts) {
+  console.log(`[${new Date().toISOString().slice(11, 19)}]`, ...parts);
+}
 
 const PORT = Number(process.env.PORT ?? 8787);
 const TOKEN = process.env.TRANSCRIBE_TOKEN;
@@ -36,11 +43,12 @@ if (!existsSync(MODEL_PATH)) {
   process.exit(1);
 }
 
-async function transcribe(url) {
+async function transcribe(url, tag) {
   const workDir = await mkdtemp(join(tmpdir(), "transcribe-"));
 
   try {
-    console.log(`  downloading audio`);
+    log(`${tag} downloading audio`);
+    const downloadStart = Date.now();
     await run("yt-dlp", [
       "-x",
       "--audio-format", "wav",
@@ -50,14 +58,23 @@ async function transcribe(url) {
       url,
     ], { timeout: 900_000, maxBuffer: 64 * 1024 * 1024 });
 
-    console.log(`  transcribing with ${MODEL}`);
+    const audio = join(workDir, "audio.wav");
+    const { size } = await stat(audio);
+    const minutes = size / (16000 * 2 * 60);
+    log(
+      `${tag} audio ready: ${minutes.toFixed(1)} min, ${(size / 1024 / 1024).toFixed(0)} MB,`,
+      `downloaded in ${((Date.now() - downloadStart) / 1000).toFixed(0)}s`,
+    );
+    log(`${tag} transcribing with ${MODEL}, expect roughly ${Math.ceil(minutes / 25)} min`);
+    const transcribeStart = Date.now();
     await run("whisper-cli", [
       "-m", MODEL_PATH,
-      "-f", join(workDir, "audio.wav"),
+      "-f", audio,
       "-ovtt",
       "-of", join(workDir, "out"),
     ], { timeout: 3_600_000, maxBuffer: 64 * 1024 * 1024 });
 
+    log(`${tag} transcribed in ${((Date.now() - transcribeStart) / 1000).toFixed(0)}s`);
     return mergeSegments(parseVtt(await readFile(join(workDir, "out.vtt"), "utf8")));
   } finally {
     await rm(workDir, { recursive: true, force: true });
@@ -76,6 +93,8 @@ function readBody(request) {
   });
 }
 
+let requests = 0;
+
 const server = createServer(async (request, response) => {
   const send = (status, payload) => {
     response.writeHead(status, { "content-type": "application/json" });
@@ -83,7 +102,7 @@ const server = createServer(async (request, response) => {
   };
 
   if (request.method === "GET" && request.url === "/health") {
-    return send(200, { ok: true, model: MODEL });
+    return send(200, { ok: true, model: MODEL, uptime: since(), requests });
   }
 
   if (request.method !== "POST" || request.url !== "/transcribe") {
@@ -91,6 +110,7 @@ const server = createServer(async (request, response) => {
   }
 
   if (request.headers.authorization !== `Bearer ${TOKEN}`) {
+    log("rejected a request with a bad or missing token");
     return send(401, { error: "Unauthorized" });
   }
 
@@ -113,20 +133,31 @@ const server = createServer(async (request, response) => {
     return send(400, { error: "Only http and https URLs are accepted" });
   }
 
-  console.log(`transcribe ${parsed.hostname}${parsed.pathname}`);
+  const tag = `#${++requests}`;
+  const fileName = parsed.pathname.split("/").pop() || parsed.hostname;
+  log(`${tag} request from ${parsed.hostname}: ${fileName}`);
   const startedAt = Date.now();
 
   try {
-    const segments = await transcribe(url);
-    console.log(`  done: ${segments.length} segments in ${Math.round((Date.now() - startedAt) / 1000)}s`);
+    const segments = await transcribe(url, tag);
+    const elapsed = Math.round((Date.now() - startedAt) / 1000);
+    const covered = Math.round((segments[segments.length - 1]?.end ?? 0) / 60);
+    log(`${tag} done: ${segments.length} segments covering ${covered} min, in ${elapsed}s`);
     send(200, { segments });
   } catch (error) {
-    console.error("  failed:", error.message);
+    log(`${tag} FAILED after ${Math.round((Date.now() - startedAt) / 1000)}s: ${error.message}`);
     send(502, { error: "Transcription failed" });
   }
 });
 
 server.listen(PORT, () => {
-  console.log(`Transcription server on http://127.0.0.1:${PORT} using ${MODEL}`);
-  console.log("Expose it with: cloudflared tunnel --url http://127.0.0.1:" + PORT);
+  log(`Transcription server listening on http://127.0.0.1:${PORT}`);
+  log(`Model: ${MODEL}`);
+  log(`Expose it with: ngrok http ${PORT}`);
+  log("Waiting for requests. Ctrl+C to stop.");
+});
+
+process.on("SIGINT", () => {
+  log(`Stopping after ${requests} request(s), up ${since()}.`);
+  process.exit(0);
 });
