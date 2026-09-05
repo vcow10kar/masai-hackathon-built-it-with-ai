@@ -1,36 +1,130 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Ask the Lecture
 
-## Getting Started
+Ask a question about a lecture recording and get an answer drawn from that
+lecture, with the timestamp it came from. Clicking the timestamp seeks the
+video to that moment.
 
-First, run the development server:
+Live: https://ask-the-lecture.vercel.app
+
+## How it works
+
+1. Paste a YouTube URL. The server fetches the video's published captions,
+   which already carry timestamps, and merges the short cues into passages
+   large enough to answer from.
+2. The transcript is stored as JSON, keyed by video id.
+3. A question is scored against those passages with BM25, and the best few are
+   given to a language model that must answer from them alone and cite the
+   passage ids it used.
+4. Cited ids resolve back to segment start times, which become the chips under
+   each answer. Clicking one seeks the player.
+
+Captions are preferred over speech-to-text because they are already
+timestamped and take seconds rather than minutes to fetch. Whisper exists as a
+fallback for videos that publish none.
+
+## Tech stack
+
+| Layer | Choice |
+| --- | --- |
+| Framework | Next.js 16 (App Router, React 19, TypeScript) |
+| Styling | Tailwind CSS v4 |
+| Hosting | Vercel |
+| Database | Supabase (Postgres, `lectures` table with a `jsonb` column) |
+| Video playback | YouTube IFrame Player API, and `<video>` for direct file links |
+| Retrieval | BM25, implemented in `src/lib/retrieval.ts` |
+| Runtime | Node.js 25 |
+
+## Models and APIs
+
+Each integration picks the first option that is configured, so the deployed app
+uses hosted services while a laptop with no keys still works offline.
+
+### Answering
+
+| Provider | Model | Used when |
+| --- | --- | --- |
+| OpenRouter | `openai/gpt-oss-20b` | `OPENROUTER_API_KEY` is set |
+| Anthropic | `claude-sonnet-5` | `ANTHROPIC_API_KEY` is set |
+| Ollama | `gpt-oss:20b` | neither key is set, local only |
+
+Model ids are overridable with `OPENROUTER_MODEL`, `ANTHROPIC_MODEL` and
+`OLLAMA_MODEL`.
+
+### Transcripts
+
+| Source | Used when |
+| --- | --- |
+| Supadata transcript API | `SUPADATA_API_KEY` is set. The only option that works when deployed. |
+| `yt-dlp` | no key set. Needs the binary, so local only. |
+| `whisper.cpp` (`ggml-small.en`) | a video publishes no captions. Local only. |
+
+### Storage
+
+| Store | Used when |
+| --- | --- |
+| Supabase | `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are set |
+| `data/lectures/*.json` | neither is set |
+
+### Other services
+
+- **YouTube oEmbed** for the video title and channel. No key required.
+
+`GET /api/health` reports which of these a running deployment resolved to,
+by name and never by value.
+
+## Routes
+
+| Route | Purpose |
+| --- | --- |
+| `/` | The workspace: player, transcript, notes and chat. `?lecture=<id>` opens one. |
+| `/library` | Every ingested lecture, with its transcript source and coverage. |
+| `POST /api/ingest` | Builds and stores a transcript. Streams progress as newline-delimited JSON. |
+| `POST /api/ask` | Retrieves passages and returns a cited answer. |
+| `GET /api/health` | Which integrations are configured. |
+
+## Setup
 
 ```bash
+npm install
+cp .env.example .env.local   # fill in what you need; all of it is optional locally
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+With no environment variables at all, the app stores transcripts on disk and
+answers with a local Ollama model. That path needs:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+brew install yt-dlp
+ollama pull gpt-oss:20b
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+For the Supabase-backed path, run `supabase/schema.sql` once in the Supabase
+SQL editor, then set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`. The
+service role key bypasses row-level security, so it must stay server-side.
 
-## Learn More
+### Optional command line ingest
 
-To learn more about Next.js, take a look at the following resources:
+The UI does this itself; the script is for loading several lectures at once.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+npm run ingest -- "https://www.youtube.com/watch?v=..."
+npm run whisper:model small.en    # only for videos without captions
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Project layout
 
-## Deploy on Vercel
+```
+src/app/            routes and pages
+src/components/     player, transcript panel, chat, URL bar
+src/lib/            retrieval, answering, storage, transcripts, parsing
+scripts/            command line ingest and model download
+supabase/schema.sql the lectures table
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Known limits
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- Only YouTube videos can be transcribed automatically. Direct video file links
+  play, but have no transcript.
+- The Whisper fallback is local only; a deployed instance cannot transcribe a
+  video that publishes no captions.
+- The Notes tab is placeholder content. The Transcript tab is real.
