@@ -53,7 +53,12 @@ async function fetchMetadata(url: string) {
 async function fetchBridgedSpeechToText(url: string, endpoint: string) {
   const token = process.env.TRANSCRIBE_TOKEN;
 
-  const response = await fetch(endpoint, {
+  // Accept either the tunnel root or the full endpoint, since both are natural
+  // things to paste.
+  const target = endpoint.replace(/\/+$/, "");
+  const address = target.endsWith("/transcribe") ? target : `${target}/transcribe`;
+
+  const response = await fetch(address, {
     method: "POST",
     headers: {
       "content-type": "application/json",
