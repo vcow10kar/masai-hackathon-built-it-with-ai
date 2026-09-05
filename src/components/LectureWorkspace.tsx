@@ -11,11 +11,12 @@ import {
 import { ChatPanel } from "@/components/ChatPanel";
 import { LecturePlayer, type SeekRequest } from "@/components/LecturePlayer";
 import { SourcePanel, type SourceTab } from "@/components/SourcePanel";
-import { useStoredChats, useStoredNotes } from "@/lib/local-workspace";
+import { useClosedChats, useStoredChats, useStoredNotes } from "@/lib/local-workspace";
 import { activeSegmentIndex } from "@/lib/segments";
 import { parseVideoSource, type VideoSource } from "@/lib/video-source";
 import type {
   ChatMessage,
+  ChatThread,
   Citation,
   FrameAttachment,
   LectureWorkspaceData,
@@ -56,7 +57,16 @@ export function LectureWorkspace({ lecture, initialWorkspace, layout }: Props) {
   );
   const [chats, setChats] = useStoredChats(lecture?.id ?? null, seedChats);
   const [notes, setNotes] = useStoredNotes(lecture?.id ?? null, initialWorkspace.notes);
+  // Closing a tab puts a chat away rather than throwing it out: it stays in
+  // the history menu, and picking it there opens it again.
+  const [closedChats, setClosedChats] = useClosedChats(lecture?.id ?? null);
   const [activeChatId, setActiveChatId] = useState(seedChats[0].id);
+  // The chat on screen is always on the strip, even if it was closed in another
+  // tab while it was open here.
+  const openChats = useMemo(
+    () => chats.filter((chat) => chat.id === activeChatId || !closedChats.includes(chat.id)),
+    [chats, closedChats, activeChatId],
+  );
   const [sourceTab, setSourceTab] = useState<SourceTab>("transcript");
   const [seekRequest, setSeekRequest] = useState<SeekRequest | null>(null);
   const [currentTime, setCurrentTime] = useState<number | null>(null);
@@ -102,18 +112,53 @@ export function LectureWorkspace({ lecture, initialWorkspace, layout }: Props) {
    * Closing a chat removes it. The last one is replaced rather than left at
    * none, so the panel always has somewhere to type.
    */
+  /** Starts a chat and makes it the one on screen. */
+  function startChat(existing: ChatThread[]) {
+    const fresh = {
+      id: crypto.randomUUID(),
+      title: `Chat ${existing.length + 1}`,
+      messages: [],
+      pending: false,
+      error: null,
+    };
+    setChats([...existing, fresh]);
+    setActiveChatId(fresh.id);
+    return fresh;
+  }
+
+  /** Puts a chat away. It keeps its messages and stays in the history menu. */
+  function closeChat(id: string) {
+    setClosedChats((current) => (current.includes(id) ? current : [...current, id]));
+
+    if (id !== activeChatId) return;
+    const next = openChats.find((chat) => chat.id !== id);
+    if (next) setActiveChatId(next.id);
+    // Closing the last open tab would leave nowhere to type.
+    else startChat(chats);
+  }
+
+  /** Removes a chat and its messages for good. */
   function deleteChat(id: string) {
     const remaining = chats.filter((chat) => chat.id !== id);
+    setClosedChats((current) => current.filter((chatId) => chatId !== id));
 
     if (remaining.length === 0) {
-      const fresh = { id: crypto.randomUUID(), title: "Chat 1", messages: [], pending: false, error: null };
-      setChats([fresh]);
-      setActiveChatId(fresh.id);
+      startChat([]);
       return;
     }
 
     setChats(remaining);
-    if (id === activeChatId) setActiveChatId(remaining[remaining.length - 1].id);
+    if (id !== activeChatId) return;
+
+    const next = remaining.find((chat) => !closedChats.includes(chat.id));
+    if (next) setActiveChatId(next.id);
+    else startChat(remaining);
+  }
+
+  /** Picking a chat from the history menu brings it back onto the tab strip. */
+  function selectChat(id: string) {
+    setClosedChats((current) => current.filter((chatId) => chatId !== id));
+    setActiveChatId(id);
   }
 
   function addChat() {
@@ -299,16 +344,18 @@ export function LectureWorkspace({ lecture, initialWorkspace, layout }: Props) {
 
   const chatPanel = (
     <ChatPanel
-      chats={chats}
+      chats={openChats}
+      historyChats={chats}
       activeChatId={activeChatId}
       disabled={lecture === null}
       capturedFrame={capturedFrame}
-      onChatSelect={setActiveChatId}
+      onChatSelect={selectChat}
       onNewChat={addChat}
       onFrameRemove={() => setCapturedFrame(null)}
       onSend={handleSend}
       onCitationClick={handleCitationClick}
       onAddNote={addToNotes}
+      onChatClose={closeChat}
       onChatDelete={deleteChat}
     />
   );

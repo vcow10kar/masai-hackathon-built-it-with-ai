@@ -17,6 +17,9 @@ type Props = {
   onSend: (question: string, frame?: FrameAttachment, newChat?: boolean) => void;
   onCitationClick: (citation: Citation) => void;
   onAddNote: (message: ChatMessage) => void;
+  /** Every chat for this lecture, including the ones put away. */
+  historyChats: ChatThread[];
+  onChatClose: (id: string) => void;
   onChatDelete: (id: string) => void;
 };
 
@@ -50,7 +53,7 @@ function trailingCitations(message: ChatMessage): Citation[] {
   );
 }
 
-export function ChatPanel({ chats, activeChatId, disabled, capturedFrame, onChatSelect, onNewChat, onFrameRemove, onSend, onCitationClick, onAddNote, onChatDelete }: Props) {
+export function ChatPanel({ chats, historyChats, activeChatId, disabled, capturedFrame, onChatSelect, onNewChat, onFrameRemove, onSend, onCitationClick, onAddNote, onChatClose, onChatDelete }: Props) {
   const [historyOpen, setHistoryOpen] = useState(false);
   const historyRef = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState("");
@@ -59,6 +62,9 @@ export function ChatPanel({ chats, activeChatId, disabled, capturedFrame, onChat
   const inputRef = useRef<HTMLInputElement>(null);
   const frameInputRef = useRef<HTMLTextAreaElement>(null);
   const activeChat = chats.find((chat) => chat.id === activeChatId) ?? chats[0];
+  // Which threads are on the strip, so the history menu can say what picking a
+  // row will do.
+  const openChatIds = new Set(chats.map((chat) => chat.id));
   const messages = activeChat?.messages ?? [];
   const pending = activeChat?.pending ?? false;
   const error = activeChat?.error ?? null;
@@ -137,9 +143,9 @@ export function ChatPanel({ chats, activeChatId, disabled, capturedFrame, onChat
               </button>
               <button
                 type="button"
-                onClick={() => onChatDelete(chat.id)}
+                onClick={() => onChatClose(chat.id)}
                 aria-label={`Close ${chat.title}`}
-                title="Close chat"
+                title="Close tab, the chat stays in the history"
                 className="mr-1.5 grid size-5 shrink-0 place-items-center rounded-full text-muted opacity-0 transition-all hover:bg-fill hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
               >
                 <svg viewBox="0 0 16 16" className="size-3" fill="none" aria-hidden="true">
@@ -177,10 +183,10 @@ export function ChatPanel({ chats, activeChatId, disabled, capturedFrame, onChat
               role="menu"
               className="absolute right-0 top-9 z-20 max-h-80 w-72 overflow-y-auto rounded-xl border border-edge bg-surface p-1 shadow-lg"
             >
-              {chats.length === 0 ? (
+              {historyChats.length === 0 ? (
                 <p className="px-3 py-2 text-[12.5px] text-subtle">No chats yet.</p>
               ) : (
-                [...chats]
+                [...historyChats]
                   // Most recently answered first: that is the one a student
                   // coming back is looking for.
                   .sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""))
@@ -201,6 +207,7 @@ export function ChatPanel({ chats, activeChatId, disabled, capturedFrame, onChat
                         <span className="block truncate text-[12.5px] font-medium text-foreground">{chat.title}</span>
                         <span className="mt-0.5 block text-[11px] tabular-nums text-subtle">
                           {chat.messages.length} message{chat.messages.length === 1 ? "" : "s"} · {lastUpdatedLabel(chat)}
+                          {openChatIds.has(chat.id) ? "" : " · closed"}
                         </span>
                       </button>
                       <button

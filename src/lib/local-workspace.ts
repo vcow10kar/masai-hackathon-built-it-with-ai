@@ -187,6 +187,20 @@ export function useClosedLectures() {
   return useShelf(CLOSED_LECTURES, "all", EMPTY as string[]);
 }
 
+/**
+ * Chats this browser has closed for one lecture. Closing a tab puts a thread
+ * away; it stays in the history menu and comes back when picked from there.
+ */
+const CLOSED_CHATS: Shelf<string> = {
+  prefix: "closed-chats",
+  isValid: (value): value is string => typeof value === "string",
+};
+
+/** The ids of chats put away for one lecture. */
+export function useClosedChats(lectureId: string | null) {
+  return useShelf(CLOSED_CHATS, lectureId, EMPTY as string[]);
+}
+
 /** This browser's notes for one lecture, and a way to change them. */
 export function useStoredNotes(lectureId: string | null, seed: NoteSection[] = EMPTY) {
   return useShelf(NOTES, lectureId, seed);
