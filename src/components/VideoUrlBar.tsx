@@ -136,7 +136,7 @@ export function VideoUrlBar({ lectures, activeLectureId, layout }: Props) {
     <div className="flex min-w-0 flex-1 items-center">
       <nav
         aria-label="Open lectures"
-        className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
       >
         {openLectures.map((lecture) => {
           const active = lecture.id === selectedLectureId;
