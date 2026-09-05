@@ -35,9 +35,11 @@ export function SourcePanel({ lectureId, lectureTitle, storedSummary, transcript
   const [summary, setSummary] = useState(storedSummary);
   const [summaryPending, setSummaryPending] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
+  const [selectedNote, setSelectedNote] = useState<NoteSection | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const activeRef = useRef<HTMLLIElement>(null);
+  const noteDialogRef = useRef<HTMLDialogElement>(null);
 
   const activeIndex = activeSegmentIndex(transcript, currentTime);
   const activeId = activeIndex >= 0 ? transcript[activeIndex].id : null;
@@ -52,6 +54,10 @@ export function SourcePanel({ lectureId, lectureTitle, storedSummary, transcript
       behavior: reduced ? "auto" : "smooth",
     });
   }, [activeId, following, tab]);
+
+  useEffect(() => {
+    if (selectedNote) noteDialogRef.current?.showModal();
+  }, [selectedNote]);
 
   async function createSummary() {
     if (!lectureId || summaryPending) return;
@@ -240,20 +246,59 @@ export function SourcePanel({ lectureId, lectureTitle, storedSummary, transcript
             Notes you create from chat answers will appear here.
           </p>
         ) : (
-          <ul className="flex flex-col gap-4 p-3">
+          <ul className="flex flex-col gap-2 p-3">
             {notes.map((section) => (
               <li key={section.id}>
-                <h3 className="overline text-foreground">{section.heading}</h3>
-                {/* A note is an answer the student kept, so it carries the same
-                    bullets and paragraphs and is laid out the same way. */}
-                <div className="mt-1.5 text-[13.5px] leading-[1.6] text-muted">
-                  <AnswerText text={section.body} citations={[]} onCitationClick={() => {}} />
-                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedNote(section)}
+                  aria-haspopup="dialog"
+                  className="flex w-full items-center justify-between gap-4 rounded-xl border border-separator bg-segment px-4 py-3.5 text-left transition-colors hover:bg-fill"
+                >
+                  <h3 className="text-[14px] font-semibold leading-snug text-foreground">
+                    {section.heading}
+                  </h3>
+                  <svg viewBox="0 0 16 16" className="mb-0.5 size-4 shrink-0 text-subtle" fill="none" aria-hidden="true">
+                    <path d="m6 3 5 5-5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
               </li>
             ))}
           </ul>
         )}
       </div>
+
+      <dialog
+        ref={noteDialogRef}
+        onClose={() => setSelectedNote(null)}
+        onClick={(event) => {
+          if (event.target === event.currentTarget) event.currentTarget.close();
+        }}
+        className="m-auto max-h-[85dvh] w-[min(42rem,calc(100%-2rem))] rounded-2xl bg-surface p-0 text-foreground shadow-raised backdrop:bg-black/70"
+      >
+        {selectedNote && (
+          <article>
+            <header className="flex items-start justify-between gap-4 border-b border-separator px-5 py-4 sm:px-6">
+              <h2 className="text-balance text-[18px] font-semibold leading-snug">
+                {selectedNote.heading}
+              </h2>
+              <button
+                type="button"
+                onClick={() => noteDialogRef.current?.close()}
+                aria-label="Close note"
+                className="grid size-8 shrink-0 place-items-center rounded-full text-muted transition-colors hover:bg-fill hover:text-foreground"
+              >
+                <svg viewBox="0 0 16 16" className="size-4" fill="none" aria-hidden="true">
+                  <path d="m4 4 8 8m0-8-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                </svg>
+              </button>
+            </header>
+            <div className="max-h-[calc(85dvh-4.5rem)] overflow-y-auto px-5 py-5 text-[13.5px] leading-[1.7] text-muted sm:px-6">
+              <AnswerText text={selectedNote.body} citations={[]} onCitationClick={() => {}} />
+            </div>
+          </article>
+        )}
+      </dialog>
     </section>
   );
 }

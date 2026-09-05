@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import Link, { useLinkStatus } from "next/link";
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { formatTimestamp } from "@/lib/format";
@@ -16,6 +16,22 @@ type Props = {
   layout: WorkspaceLayout;
 };
 
+function LectureTabIcon() {
+  const { pending } = useLinkStatus();
+
+  return pending ? (
+    <svg viewBox="0 0 16 16" className="size-3.5 shrink-0 animate-spin" fill="none" role="status" aria-label="Loading lecture">
+      <circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeOpacity=".3" />
+      <path d="M8 2.5a5.5 5.5 0 0 1 5.5 5.5" stroke="currentColor" strokeLinecap="round" />
+    </svg>
+  ) : (
+    <svg viewBox="0 0 16 16" className="size-3.5 shrink-0" fill="none" aria-hidden="true">
+      <rect x="1.5" y="3" width="13" height="10" rx="2" stroke="currentColor" />
+      <path d="m6.5 6 4 2-4 2V6Z" fill="currentColor" />
+    </svg>
+  );
+}
+
 export function VideoUrlBar({ lectures, activeLectureId, layout }: Props) {
   const router = useRouter();
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -24,6 +40,7 @@ export function VideoUrlBar({ lectures, activeLectureId, layout }: Props) {
   const [preview, setPreview] = useState<StreamedSegment[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [selectedLectureId, setSelectedLectureId] = useState(activeLectureId);
   const [closed, setClosed] = useClosedLectures();
 
   // A closed lecture stays out of the bar until it is opened again, but the one
@@ -122,7 +139,7 @@ export function VideoUrlBar({ lectures, activeLectureId, layout }: Props) {
         className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         {openLectures.map((lecture) => {
-          const active = lecture.id === activeLectureId;
+          const active = lecture.id === selectedLectureId;
           return (
             <span
               key={lecture.id}
@@ -135,14 +152,12 @@ export function VideoUrlBar({ lectures, activeLectureId, layout }: Props) {
               <Link
                 href={{ pathname: "/", query: { lecture: lecture.id, layout } }}
                 scroll={false}
+                onClick={() => setSelectedLectureId(lecture.id)}
                 aria-current={active ? "page" : undefined}
                 title={lecture.title}
                 className="flex min-w-0 items-center gap-2 py-2 pl-3 pr-1"
               >
-                <svg viewBox="0 0 16 16" className="size-3.5 shrink-0" fill="none" aria-hidden="true">
-                  <rect x="1.5" y="3" width="13" height="10" rx="2" stroke="currentColor" />
-                  <path d="m6.5 6 4 2-4 2V6Z" fill="currentColor" />
-                </svg>
+                <LectureTabIcon />
                 <span className="truncate">{lecture.title}</span>
               </Link>
               <button
@@ -159,16 +174,16 @@ export function VideoUrlBar({ lectures, activeLectureId, layout }: Props) {
             </span>
           );
         })}
-
-        <button
-          type="button"
-          onClick={() => dialogRef.current?.showModal()}
-          className="flex h-9 shrink-0 items-center gap-1.5 rounded-lg px-3 text-[12px] font-semibold text-accent-ink transition-colors hover:bg-accent-wash"
-        >
-          <span className="text-lg font-light leading-none" aria-hidden="true">+</span>
-          New lecture
-        </button>
       </nav>
+
+      <button
+        type="button"
+        onClick={() => dialogRef.current?.showModal()}
+        className="flex h-9 shrink-0 items-center gap-1.5 rounded-lg px-3 text-[12px] font-semibold text-accent-ink transition-colors hover:bg-accent-wash"
+      >
+        <span className="text-lg font-light leading-none" aria-hidden="true">+</span>
+        New lecture
+      </button>
 
       <dialog
         ref={dialogRef}
