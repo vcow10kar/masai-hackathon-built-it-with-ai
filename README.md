@@ -54,9 +54,17 @@ Model ids are overridable with `OPENROUTER_MODEL`, `ANTHROPIC_MODEL` and
 
 | Source | Used when |
 | --- | --- |
-| Supadata transcript API | `SUPADATA_API_KEY` is set. The only option that works when deployed. |
-| `yt-dlp` | no key set. Needs the binary, so local only. |
-| `whisper.cpp` (`ggml-small.en`) | a video publishes no captions and no key is set. Local only. |
+| Supadata transcript API | a YouTube link and `SUPADATA_API_KEY` is set. The only YouTube option that works when deployed. |
+| `yt-dlp` | a YouTube link and no key set. Needs the binary, so local only. |
+| Deepgram (`nova-3`) | a link with no captions, such as a direct MP4, and `DEEPGRAM_API_KEY` is set. Deepgram fetches the URL itself, so the file never passes through the app. |
+| `whisper.cpp` (`ggml-small.en`) | a link with no captions and no Deepgram key. Local only. |
+
+Captions and speech to text are separate services because they solve different
+problems. A YouTube lecture usually has a timestamped caption track already,
+which is faster and cheaper to read than transcribing the audio. A direct media
+link has none, so it has to be transcribed. Deepgram cannot stand in for
+Supadata either: a YouTube watch page is not a media file, and extracting its
+audio stream needs `yt-dlp`, which cannot run on the deployment.
 
 ### Storage
 
@@ -80,6 +88,7 @@ by name and never by value.
 | `/library` | Every ingested lecture, with its transcript source and coverage. |
 | `POST /api/ingest` | Builds and stores a transcript. Streams progress as newline-delimited JSON. |
 | `POST /api/ask` | Retrieves passages and returns a cited answer. |
+| `DELETE /api/lectures/<id>` | Removes a lecture and its transcript from the store. |
 | `GET /api/health` | Which integrations are configured. |
 
 ## Setup
@@ -125,8 +134,6 @@ supabase/schema.sql the lectures table
 
 ## Known limits
 
-- Only YouTube videos can be transcribed automatically. Direct video file links
-  play, but have no transcript.
-- The Whisper fallback is local only; a deployed instance cannot transcribe a
-  video that publishes no captions.
+- A deployment without `DEEPGRAM_API_KEY` cannot transcribe a video that has no
+  captions, since the local Whisper fallback needs a binary.
 - The Notes tab is placeholder content. The Transcript tab is real.

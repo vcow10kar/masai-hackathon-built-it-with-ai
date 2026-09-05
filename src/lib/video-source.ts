@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 export type VideoSource =
   | { kind: "youtube"; videoId: string; url: string }
   | { kind: "file"; url: string };
@@ -54,4 +56,13 @@ export function parseVideoSource(input: string): VideoSource | null {
   }
 
   return { kind: "file", url: trimmed };
+}
+
+/**
+ * Stable id for a lecture. YouTube videos key on their video id so the same
+ * video is never stored twice; other links key on a hash of the URL.
+ */
+export function lectureIdFor(source: VideoSource): string {
+  if (source.kind === "youtube") return source.videoId;
+  return `f${createHash("sha1").update(source.url).digest("hex").slice(0, 15)}`;
 }

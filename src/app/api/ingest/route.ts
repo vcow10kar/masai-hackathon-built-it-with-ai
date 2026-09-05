@@ -1,6 +1,6 @@
 import { getLecture, saveLecture } from "@/lib/store";
 import { buildLecture } from "@/lib/transcript";
-import { parseVideoSource } from "@/lib/video-source";
+import { lectureIdFor, parseVideoSource } from "@/lib/video-source";
 
 // Fetching captions takes seconds; a cold local run can take longer.
 export const maxDuration = 300;
@@ -47,22 +47,22 @@ export async function POST(request: Request) {
   const url = typeof body.url === "string" ? body.url.trim() : "";
   const source = parseVideoSource(url);
 
-  if (!source || source.kind !== "youtube") {
+  if (!source) {
     return Response.json(
-      { error: "Paste a YouTube link. Other videos cannot be transcribed automatically yet." },
+      { error: "Paste a YouTube link or a direct link to a video file." },
       { status: 400 },
     );
   }
 
   const body$ = stream(async (send) => {
-    const existing = await getLecture(source.videoId);
+    const existing = await getLecture(lectureIdFor(source));
     if (existing) {
       send({ type: "status", message: "Already transcribed" });
       send({ type: "done", lectureId: existing.id, title: existing.title, reused: true });
       return;
     }
 
-    const lecture = await buildLecture(source.videoId, source.url, (message) =>
+    const lecture = await buildLecture(source, (message: string) =>
       send({ type: "status", message }),
     );
 

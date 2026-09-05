@@ -133,3 +133,25 @@ export async function saveLecture(lecture: Lecture): Promise<void> {
     `${JSON.stringify(lecture, null, 2)}\n`,
   );
 }
+
+export async function deleteLecture(id: string): Promise<boolean> {
+  if (!/^[\w-]+$/.test(id)) return false;
+
+  const client = supabase();
+  if (client) {
+    const { error, count } = await client
+      .from("lectures")
+      .delete({ count: "exact" })
+      .eq("id", id);
+    if (error) throw new Error(`Supabase delete failed: ${error.message}`);
+    return (count ?? 0) > 0;
+  }
+
+  try {
+    const { unlink } = await import("node:fs/promises");
+    await unlink(join(LECTURE_DIR, `${id}.json`));
+    return true;
+  } catch {
+    return false;
+  }
+}

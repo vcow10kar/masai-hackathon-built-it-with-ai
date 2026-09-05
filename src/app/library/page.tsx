@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { DeleteLectureButton } from "@/components/DeleteLectureButton";
 import { formatTimestamp } from "@/lib/format";
 import { listLectures } from "@/lib/store";
 
@@ -96,6 +97,7 @@ export default async function LibraryPage() {
                     >
                       Source video
                     </a>
+                    <DeleteLectureButton lectureId={lecture.id} title={lecture.title} />
                   </div>
                 </li>
               );
