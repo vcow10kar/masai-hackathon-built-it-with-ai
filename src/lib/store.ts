@@ -171,10 +171,14 @@ export async function getLectureWorkspace(lectureId: string): Promise<LectureWor
       .select("chats, notes")
       .eq("lecture_id", lectureId)
       .maybeSingle();
-    if (error) throw new Error(`Supabase workspace read failed: ${error.message}`);
-    return data
-      ? { chats: settledChats(data.chats as ChatThread[]), notes: data.notes as NoteSection[] }
-      : { chats: [], notes: [] };
+    if (!error) {
+      return data
+        ? { chats: settledChats(data.chats as ChatThread[]), notes: data.notes as NoteSection[] }
+        : { chats: [], notes: [] };
+    }
+    if (error.code !== "PGRST205") {
+      throw new Error(`Supabase workspace read failed: ${error.message}`);
+    }
   }
 
   try {
@@ -200,10 +204,13 @@ export async function saveLectureWorkspace(
       ...saved,
       updated_at: new Date().toISOString(),
     });
-    if (error) throw new Error(`Supabase workspace write failed: ${error.message}`);
-    return;
+    if (!error) return;
+    if (error.code !== "PGRST205") {
+      throw new Error(`Supabase workspace write failed: ${error.message}`);
+    }
   }
 
+  // ponytail: local fallback is not durable on serverless; apply supabase/schema.sql there.
   await mkdir(WORKSPACE_DIR, { recursive: true });
   await writeFile(
     join(WORKSPACE_DIR, `${lectureId}.json`),
