@@ -15,12 +15,12 @@ type Props = {
 
 export default async function Home({ searchParams }: Props) {
   const { lecture: lectureId, layout } = await searchParams;
-  const workspaceLayout: WorkspaceLayout = layout === "chat-right" ? "chat-right" : "sources-right";
-  const [lecture, lectures] = await Promise.all([
+  const workspaceLayout: WorkspaceLayout = layout === "sources-right" ? "sources-right" : "chat-right";
+  const [lecture, lectures, workspace] = await Promise.all([
     lectureId ? getLecture(lectureId) : null,
     listLectures(),
+    lectureId ? getLectureWorkspace(lectureId) : { chats: [], notes: [] },
   ]);
-  const workspace = lecture ? await getLectureWorkspace(lecture.id) : { chats: [], notes: [] };
 
   const workspaceLecture: WorkspaceLecture | null = lecture
     ? {
@@ -38,6 +38,7 @@ export default async function Home({ searchParams }: Props) {
       <header className="sticky top-0 z-20 flex shrink-0 items-center gap-2 border-b border-separator bg-chrome px-3 py-2 backdrop-blur-xl backdrop-saturate-150">
         <h1 className="display hidden shrink-0 text-[18px] leading-none lg:block">Ask the Lecture</h1>
         <VideoUrlBar
+          key={lecture?.id ?? "empty"}
           lectures={lectures.map(({ id, title }) => ({ id, title }))}
           activeLectureId={lecture?.id}
           layout={workspaceLayout}
