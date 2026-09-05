@@ -47,6 +47,39 @@ async function fetchMetadata(url: string) {
 }
 
 /**
+ * Sends the URL to a transcription server the operator runs themselves, which
+ * is how a deployment can use whisper.cpp on a machine it does not control.
+ */
+async function fetchBridgedSpeechToText(url: string, endpoint: string) {
+  const token = process.env.TRANSCRIBE_TOKEN;
+
+  // Accept either the tunnel root or the full endpoint, since both are natural
+  // things to paste.
+  const target = endpoint.replace(/\/+$/, "");
+  const address = target.endsWith("/transcribe") ? target : `${target}/transcribe`;
+
+  const response = await fetch(address, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ url }),
+    // Transcribing a lecture takes minutes, well past a default fetch timeout.
+    signal: AbortSignal.timeout(Number(process.env.TRANSCRIBE_TIMEOUT_MS ?? 840_000)),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Transcription server failed (${response.status}): ${await response.text()}`);
+  }
+
+  const data = await response.json();
+  const segments: TranscriptSegment[] = data.segments ?? [];
+  if (segments.length === 0) throw new Error("The transcription server returned no speech.");
+  return segments;
+}
+
+/**
  * Transcribes a media URL with Deepgram. The service fetches the file itself,
  * which is what makes this viable when deployed: a lecture recording is far
  * too large to pull through a serverless function.
@@ -234,13 +267,17 @@ export async function buildLecture(
     // A direct media link has no captions to read, so it always needs speech
     // to text.
     kind = "whisper";
+    const bridge = process.env.TRANSCRIBE_URL;
     const speechKey = process.env.DEEPGRAM_API_KEY;
 
-    if (speechKey) {
+    if (bridge) {
+      onProgress("Transcribing the audio, this takes a few minutes");
+      segments = await fetchBridgedSpeechToText(source.url, bridge);
+    } else if (speechKey) {
       onProgress("Transcribing the audio");
       segments = await fetchHostedSpeechToText(source.url, speechKey);
     } else {
-      onProgress("Transcribing the audio locally, this takes a while");
+      onProgress("Transcribing the audio locally, this takes a few minutes");
       segments = await fetchWhisperTranscript(source.url);
     }
   }
