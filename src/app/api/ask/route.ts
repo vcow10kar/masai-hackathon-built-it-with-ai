@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   extractCitations,
+  formatAnswer,
   generateAnswer,
   generateVisionAnswer,
   stripUnknownCitations,
@@ -103,9 +104,13 @@ export async function POST(request: Request) {
       ? await generateVisionAnswer(question, retrieved, frame, history, lecture.segments)
       : await generateAnswer(question, retrieved, history, atTime, lecture.segments);
 
+    // Tidy first: a citation range only resolves to chips once it has been
+    // split into single ids.
+    const answer = formatAnswer(text);
+
     // The model reads the whole transcript, so it can cite a passage keyword
     // search did not rank. Resolve against the lecture, not the excerpts.
-    const citations = extractCitations(text, lecture.segments);
+    const citations = extractCitations(answer, lecture.segments);
 
     // Asked about the moment on screen, models often answer without citing
     // anything, which leaves nothing to click. The passage at the playhead is
@@ -118,7 +123,7 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json({
-      answer: stripUnknownCitations(text, lecture.segments),
+      answer: stripUnknownCitations(answer, lecture.segments),
       citations,
       provider,
     });

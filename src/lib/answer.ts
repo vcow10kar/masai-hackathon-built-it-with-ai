@@ -11,7 +11,13 @@ const ANSWER_STYLE = `How to answer:
 - Make no assumptions. If the transcript does not say something, do not fill the gap and do not guess what the lecturer meant. Say which part the lecture does not cover.
 - Add nothing from outside the transcript: no extra background, definitions, formulas or corrections.
 - The transcript is machine-generated and can mishear words. If a word looks garbled, say it is unclear rather than deciding what it should have been.
-- Be as long as the explanation needs and no longer. Usually a short paragraph; use a few short bullets for a sequence of steps.`;
+- Be as long as the explanation needs and no longer. Usually a short paragraph; use a few short bullets for a sequence of steps.
+
+How to lay it out:
+- Plain text only. No headings, no bold or italic markers, no tables.
+- For a list, start each line with "- " and keep it to one sentence. Never leave a bullet empty.
+- Write maths the way it is said aloud: "order root n", "O(sqrt n)", "1/5". Never use LaTeX, backslashes or dollar signs.
+- Blank line between paragraphs, so the answer is readable as it stands.`;
 
 const SYSTEM_PROMPT = `You are helping a student understand one specific lecture.
 
@@ -22,6 +28,7 @@ ${ANSWER_STYLE}
 Citing:
 - Cite the passage each claim comes from using its id in square brackets, like [s7]. Use the id of the passage the claim was actually read from and no other, and only ids that appear in the transcript below.
 - Every sentence that reports something from the lecture ends with a citation, including a sentence that restates an earlier point in easier words. If you cannot point to the passage a sentence came from, do not write that sentence.
+- One id per pair of brackets. Two passages are cited as [s7] [s8], never as a range like [s7-s8].
 - If the transcript does not cover the question, say the lecture does not cover it. Do not answer from your own knowledge.
 - When the student is paused somewhere, "this", "here", "that bit" and "what he just said" all mean the passage marked NOW PLAYING. Explain that passage unless they clearly ask about something else.`;
 
@@ -149,8 +156,11 @@ function buildUserPrompt(question: string, segments: RetrievedSegment[], options
   return `${position}${transcriptBlock}${excerptBlock}Student's question: ${question}`;
 }
 
-/** Room for an explanation rather than a one-line lookup. */
-const ANSWER_TOKENS = Number(process.env.ANSWER_MAX_TOKENS ?? 900);
+/**
+ * Room for an explanation rather than a one-line lookup. A whole-lecture
+ * summary runs past 900 tokens and was arriving cut off mid-sentence.
+ */
+const ANSWER_TOKENS = Number(process.env.ANSWER_MAX_TOKENS ?? 1600);
 
 /**
  * gpt-oss answers in channels: a private `analysis` pass, then the reply on a
@@ -416,6 +426,43 @@ export async function generateVisionAnswer(
 
   throw new VisionUnavailableError(
     "Image questions need OPENROUTER_API_KEY or ANTHROPIC_API_KEY. Local Ollama has no vision model wired up here.",
+  );
+}
+
+/**
+ * Tidies an answer into the plain text the chat renders. Models reach for
+ * LaTeX and citation ranges whatever the prompt says, and the panel shows the
+ * answer as written, so `\(O(\sqrt n)\)` would reach the student verbatim.
+ */
+export function formatAnswer(text: string) {
+  return (
+    text
+      // \(...\), \[...\] and $...$ wrap maths that is readable without them.
+      .replace(/\\[([]\s*([\s\S]*?)\s*\\[)\]]/g, "$1")
+      .replace(/\$\$?([^$\n]+?)\$\$?/g, "$1")
+      // The handful of commands that turn up in a spoken-maths explanation.
+      .replace(/\\sqrt\s*\{([^{}]*)\}/g, "sqrt($1)")
+      .replace(/\\sqrt\s+(\w+)/g, "sqrt $1")
+      .replace(/\\frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, "$1/$2")
+      .replace(/\\(?:log|ln|sin|cos|tan|exp|max|min|sum|cdot|times|approx|pi|theta|alpha|beta|sigma|lambda|mu)\b/g, (command) =>
+        ({ "\\cdot": "·", "\\times": "×", "\\approx": "≈" })[command] ?? command.slice(1),
+      )
+      // TeX spacing commands: each is a backslash plus the character, so the
+      // escapes stay doubled or a bare ";" would be stripped from prose.
+      .replace(/\\left|\\right|\\!|\\,|\\;|\\:/g, "")
+      // A range is two citations, and only single ids resolve to a chip.
+      .replace(/\[\s*s(\d+)\s*[-–—]\s*s?(\d+)\s*\]/g, (marker, from: string, to: string) => {
+        const start = Number(from);
+        const end = Number(to);
+        if (end < start || end - start > 8) return marker;
+        return Array.from({ length: end - start + 1 }, (_, step) => `[s${start + step}]`).join(" ");
+      })
+      // Bullets the model left empty, and the blank lines they leave behind.
+      .split("\n")
+      .filter((line) => !/^\s*[-*•]\s*$/.test(line))
+      .join("\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim()
   );
 }
 

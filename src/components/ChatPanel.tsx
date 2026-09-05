@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import { AnswerText } from "./AnswerText";
 import { useEffect, useRef, useState } from "react";
 import { formatTimestamp } from "@/lib/format";
 import type { ChatMessage, ChatThread, Citation, FrameAttachment } from "@/lib/types";
@@ -18,6 +19,16 @@ type Props = {
   onAddNote: (message: ChatMessage) => void;
   addingNoteId: string | null;
 };
+
+/** Citations with no marker in the answer text, so nothing links to them yet. */
+function trailingCitations(message: ChatMessage): Citation[] {
+  return (message.citations ?? []).filter(
+    (citation) =>
+      citation.kind !== "transcript" ||
+      message.role !== "assistant" ||
+      !message.content.includes(`[${citation.segmentId}]`),
+  );
+}
 
 export function ChatPanel({ chats, activeChatId, disabled, capturedFrame, onChatSelect, onNewChat, onFrameRemove, onSend, onCitationClick, onAddNote, addingNoteId }: Props) {
   const [draft, setDraft] = useState("");
@@ -97,11 +108,17 @@ export function ChatPanel({ chats, activeChatId, disabled, capturedFrame, onChat
               {message.frame && (
                 <Image src={message.frame.dataUrl} alt={`Captured lecture frame at ${formatTimestamp(message.frame.timestamp)}`} width={320} height={180} unoptimized className="mb-2 max-h-40 w-full rounded-xl object-contain" />
               )}
-              <p className="whitespace-pre-wrap">{message.content}</p>
+              {message.role === "assistant" ? (
+                <AnswerText text={message.content} citations={message.citations ?? []} onCitationClick={onCitationClick} />
+              ) : (
+                <p className="whitespace-pre-wrap">{message.content}</p>
+              )}
 
-              {message.citations && message.citations.length > 0 && (
+              {/* Only the citations the answer did not already carry inline: a
+                  chip repeated under the sentence it came from is noise. */}
+              {trailingCitations(message).length > 0 && (
                 <div className="mt-2.5 flex flex-wrap gap-1.5">
-                  {message.citations.map((citation, index) => citation.kind === "transcript" ? (
+                  {trailingCitations(message).map((citation, index) => citation.kind === "transcript" ? (
                     <button key={index} type="button" onClick={() => onCitationClick(citation)} className="rounded-full bg-accent-wash px-2.5 py-1 font-mono text-[11px] font-medium tabular-nums text-accent-ink transition-colors hover:bg-accent-wash-hover">
                       {formatTimestamp(citation.start)}
                     </button>
