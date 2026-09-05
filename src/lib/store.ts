@@ -3,7 +3,7 @@ import "server-only";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { ChatThread, LectureWorkspaceData, NoteSection, TranscriptSegment } from "./types";
+import type { ChatThread, LectureWorkspaceData, NoteSection, QuizQuestion, TranscriptSegment } from "./types";
 
 export type Lecture = {
   id: string;
@@ -16,6 +16,7 @@ export type Lecture = {
   ingestedAt: string;
   segments: TranscriptSegment[];
   summary?: string;
+  quiz?: QuizQuestion[];
 };
 
 type LectureRow = {
@@ -55,6 +56,7 @@ function fromRow(row: LectureRow): Lecture {
     ingestedAt: row.ingested_at,
     segments: row.segments,
     summary: row.segments[0]?.aiSummary,
+    quiz: row.segments[0]?.aiQuiz,
   };
 }
 
@@ -68,7 +70,9 @@ function toRow(lecture: Lecture): LectureRow {
     source: lecture.source,
     ingested_at: lecture.ingestedAt,
     segments: lecture.segments.map((segment, index) =>
-      index === 0 && lecture.summary ? { ...segment, aiSummary: lecture.summary } : segment,
+      index === 0
+        ? { ...segment, ...(lecture.summary ? { aiSummary: lecture.summary } : {}), ...(lecture.quiz ? { aiQuiz: lecture.quiz } : {}) }
+        : segment,
     ),
   };
 }
@@ -194,4 +198,3 @@ export async function getLectureWorkspace(lectureId: string): Promise<LectureWor
     return { chats: [], notes: [] };
   }
 }
-

@@ -3,15 +3,17 @@
 import { useEffect, useRef, useState } from "react";
 import { formatTimestamp } from "@/lib/format";
 import { activeSegmentIndex } from "@/lib/segments";
-import type { NoteSection, TranscriptSegment } from "@/lib/types";
+import type { NoteSection, QuizQuestion, TranscriptSegment } from "@/lib/types";
 import { AnswerText } from "./AnswerText";
+import { QuizPanel } from "./QuizPanel";
 
-export type SourceTab = "transcript" | "summary" | "notes";
+export type SourceTab = "transcript" | "summary" | "notes" | "quiz";
 
 type Props = {
   lectureId: string | null;
   lectureTitle: string;
   storedSummary: string | null;
+  storedQuiz: QuizQuestion[] | null;
   transcript: TranscriptSegment[];
   notes: NoteSection[];
   /** Playback position, or null before anything has played. */
@@ -30,7 +32,7 @@ function opacityFor(distance: number) {
   return 0.3;
 }
 
-export function SourcePanel({ lectureId, lectureTitle, storedSummary, transcript, notes, currentTime, onSeek, tab, onTabChange, onElaborate }: Props) {
+export function SourcePanel({ lectureId, lectureTitle, storedSummary, storedQuiz, transcript, notes, currentTime, onSeek, tab, onTabChange, onElaborate }: Props) {
   const [following, setFollowing] = useState(true);
   const [summary, setSummary] = useState(storedSummary);
   const [summaryPending, setSummaryPending] = useState(false);
@@ -79,8 +81,8 @@ export function SourcePanel({ lectureId, lectureTitle, storedSummary, transcript
   return (
     <section className="panel flex h-full min-h-0 flex-col overflow-hidden rounded-2xl">
       <div className="flex shrink-0 items-center justify-between gap-3 border-b border-separator px-3 py-2.5">
-        <div className="flex gap-0.5 rounded-[10px] bg-sunken p-0.5">
-          {(["transcript", "summary", "notes"] as const).map((value) => (
+        <div className="flex max-w-full gap-0.5 overflow-x-auto rounded-[10px] bg-sunken p-0.5">
+          {(["transcript", "summary", "notes", "quiz"] as const).map((value) => (
             <button
               key={value}
               type="button"
@@ -237,6 +239,8 @@ export function SourcePanel({ lectureId, lectureTitle, storedSummary, transcript
               </div>
             </div>
           )
+        ) : tab === "quiz" ? (
+          <QuizPanel lectureId={lectureId} storedQuiz={storedQuiz} onSeek={onSeek} />
         ) : notes.length === 0 ? (
           <p className="p-3 text-[13px] leading-relaxed text-subtle">
             Notes you create from chat answers will appear here.

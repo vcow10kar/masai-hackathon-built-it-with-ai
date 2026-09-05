@@ -1,8 +1,9 @@
 import "server-only";
 
 import { formatTimestamp } from "./format";
+import { parseQuiz } from "./quiz";
 import type { RetrievedSegment } from "./retrieval";
-import type { FrameAttachment, TranscriptSegment } from "./types";
+import type { FrameAttachment, QuizQuestion, TranscriptSegment } from "./types";
 
 const ANSWER_STYLE = `How to answer:
 - Write in simple, plain English, for someone meeting the idea for the first time. Short sentences, everyday words.
@@ -59,6 +60,49 @@ Format rules:
 - Put the block content on following lines. Use concise paragraphs, • bullets, or numbered steps.
 - Cover the central idea, key concepts, processes, examples, formulas, and conclusions that are actually present.
 - Prefer 5–8 blocks and keep the complete summary under 1,200 words.`;
+
+const QUIZ_SYSTEM_PROMPT = `Create a five-question multiple-choice quiz from one lecture transcript.
+
+Use only the transcript. Test understanding of the lecture's most important ideas, processes, examples, or formulas. Cover different parts of the lecture. Avoid trivia and trick questions. Make every wrong option plausible but clearly incorrect from the transcript. Keep questions and options concise.
+
+For every question, cite exactly one transcript segment id that directly supports the correct answer. Explain why the correct option is right in one or two plain-English sentences.`;
+
+const QUIZ_RESPONSE_FORMAT = {
+  type: "json_schema",
+  json_schema: {
+    name: "lecture_quiz",
+    strict: true,
+    schema: {
+      type: "object",
+      properties: {
+        questions: {
+          type: "array",
+          minItems: 5,
+          maxItems: 5,
+          items: {
+            type: "object",
+            properties: {
+              question: { type: "string" },
+              options: {
+                type: "array",
+                minItems: 4,
+                maxItems: 4,
+                items: { type: "string" },
+              },
+              correctOption: { type: "integer", minimum: 0, maximum: 3 },
+              explanation: { type: "string" },
+              segmentId: { type: "string" },
+            },
+            required: ["question", "options", "correctOption", "explanation", "segmentId"],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ["questions"],
+      additionalProperties: false,
+    },
+  },
+} as const;
 
 export type Turn = { role: "user" | "assistant"; content: string };
 
@@ -241,7 +285,7 @@ async function askOpenRouter(
   apiKey: string,
   history: Turn[],
   frame?: FrameAttachment,
-  options: { model?: string; system?: string; maxTokens?: number } = {},
+  options: { model?: string; system?: string; maxTokens?: number; responseFormat?: object } = {},
 ) {
   const userContent = frame
     ? [
@@ -265,7 +309,13 @@ async function askOpenRouter(
       reasoning: { effort: process.env.ANSWER_REASONING_EFFORT ?? "medium" },
       // The transcript is in front of the model; invention is the failure to
       // guard against, not dullness.
-      temperature: Number(process.env.ANSWER_TEMPERATURE ?? 0.2),
+      // GPT Sol's structured-output endpoints do not accept temperature.
+      ...(options.responseFormat
+        ? {}
+        : { temperature: Number(process.env.ANSWER_TEMPERATURE ?? 0.2) }),
+      ...(options.responseFormat
+        ? { response_format: options.responseFormat, provider: { require_parameters: true } }
+        : {}),
       messages: [
         {
           role: "system",
@@ -311,6 +361,32 @@ export async function generateSummary(
     undefined,
     { model: SUMMARY_MODEL, system: SUMMARY_SYSTEM_PROMPT, maxTokens: 3000 },
   );
+}
+
+export async function generateQuiz(
+  title: string,
+  segments: TranscriptSegment[],
+): Promise<QuizQuestion[]> {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) {
+    throw new Error("AI quizzes need OPENROUTER_API_KEY for GPT-5.6 Sol.");
+  }
+
+  const transcript = segments.map(segmentJson).join("\n");
+  const response = await askOpenRouter(
+    `Lecture title: ${title}\n\nLecture transcript, one JSON object per line:\n${transcript}`,
+    apiKey,
+    [],
+    undefined,
+    {
+      model: SUMMARY_MODEL,
+      system: QUIZ_SYSTEM_PROMPT,
+      maxTokens: 2500,
+      responseFormat: QUIZ_RESPONSE_FORMAT,
+    },
+  );
+
+  return parseQuiz(JSON.parse(response), segments);
 }
 
 /**

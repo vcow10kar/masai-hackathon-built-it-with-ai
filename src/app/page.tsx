@@ -32,6 +32,7 @@ export default async function Home({ searchParams }: Props) {
         url: lecture.url,
         segments: lecture.segments,
         summary: lecture.summary ?? null,
+        quiz: lecture.quiz ?? null,
       }
     : null;
 

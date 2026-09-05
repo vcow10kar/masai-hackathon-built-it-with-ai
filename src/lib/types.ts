@@ -1,3 +1,12 @@
+export type QuizQuestion = {
+  question: string;
+  options: [string, string, string, string];
+  correctOption: number;
+  explanation: string;
+  segmentId: string;
+  start: number;
+};
+
 export type TranscriptSegment = {
   id: string;
   /** Start time in the recording, in seconds. */
@@ -6,6 +15,7 @@ export type TranscriptSegment = {
   text: string;
   /** Stored once in the first segment's Supabase JSONB object. */
   aiSummary?: string;
+  aiQuiz?: QuizQuestion[];
 };
 
 export type NoteSection = {

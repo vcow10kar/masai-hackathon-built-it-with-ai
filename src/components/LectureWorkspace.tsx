@@ -20,6 +20,7 @@ import type {
   Citation,
   FrameAttachment,
   LectureWorkspaceData,
+  QuizQuestion,
   TranscriptSegment,
 } from "@/lib/types";
 
@@ -30,6 +31,7 @@ export type WorkspaceLecture = {
   url: string;
   segments: TranscriptSegment[];
   summary: string | null;
+  quiz: QuizQuestion[] | null;
 };
 
 export type WorkspaceLayout = "chat-right" | "sources-right";
@@ -366,6 +368,7 @@ export function LectureWorkspace({ lecture, initialWorkspace, layout }: Props) {
       lectureId={lecture?.id ?? null}
       lectureTitle={lecture?.title ?? "Lecture summary"}
       storedSummary={lecture?.summary ?? null}
+      storedQuiz={lecture?.quiz ?? null}
       transcript={transcript}
       notes={notes}
       currentTime={currentTime}

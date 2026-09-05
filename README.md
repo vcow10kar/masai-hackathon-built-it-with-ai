@@ -36,6 +36,8 @@ fallback for videos that publish none.
   that passage, so "explain this" needs no typing.
 - **AI summary tab.** A study guide built from the whole transcript, generated
   on demand and stored with the lecture so it is created once.
+- **AI quiz tab.** Five transcript-grounded questions with instant feedback,
+  explanations and timestamp links, generated on demand and stored for reuse.
 - **Notes.** Any chat answer can be kept as a note, with its bullets and
   paragraphs intact.
 - **Multiple chats per lecture.** Named threads with history, kept per lecture
@@ -106,6 +108,12 @@ Sol reads the entire transcript in one pass and returns a blocked study guide,
 which is stored on the lecture and reused. There is no fallback: without an
 OpenRouter key the summary tab says so.
 
+### AI quiz
+
+The same OpenRouter model creates five multiple-choice questions as structured
+JSON. Each explanation cites a transcript segment, which resolves to a review
+timestamp. The quiz is stored with the lecture and reused.
+
 ### Transcripts
 
 | Source | Model | Used when |
@@ -151,6 +159,7 @@ by name and never by value.
 | `POST /api/ingest` | Builds and stores a transcript. Streams progress as newline-delimited JSON. |
 | `POST /api/ask` | Retrieves passages and returns a cited answer. Also accepts a captured video frame, for a question about that image. |
 | `POST /api/lectures/<id>/summary` | Generates the AI summary once and stores it on the lecture. |
+| `POST /api/lectures/<id>/quiz` | Generates five AI quiz questions once and stores them on the lecture. |
 | `DELETE /api/lectures/<id>` | Removes a lecture and its transcript from the store. |
 | `GET /api/health` | Which integrations are configured. |
 
