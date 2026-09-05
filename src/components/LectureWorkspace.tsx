@@ -22,9 +22,7 @@ type Props = {
 };
 
 export function LectureWorkspace({ lecture }: Props) {
-  const [source, setSource] = useState<VideoSource | null>(
-    lecture ? parseVideoSource(lecture.url) : null,
-  );
+  const source: VideoSource | null = lecture ? parseVideoSource(lecture.url) : null;
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -85,7 +83,7 @@ export function LectureWorkspace({ lecture }: Props) {
   return (
     <main className="grid min-h-0 flex-1 gap-4 p-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
       <div className="flex min-h-0 flex-col gap-4">
-        <VideoUrlBar onLoad={setSource} />
+        <VideoUrlBar />
 
         <LecturePlayer
           key={source ? `${source.kind}:${source.url}` : "empty"}
