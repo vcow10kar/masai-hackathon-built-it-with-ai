@@ -138,6 +138,43 @@ async function askOpenRouter(prompt: string, apiKey: string, history: Turn[], fr
   return text;
 }
 
+/**
+ * Sends the prompt to a machine the operator runs, which is how a deployment
+ * can answer with a local model it cannot host itself.
+ */
+async function askBridge(prompt: string, history: Turn[], endpoint: string) {
+  const token = process.env.TRANSCRIBE_TOKEN;
+
+  // Accept either the tunnel root or the full endpoint.
+  const target = endpoint.replace(/\/+$/, "");
+  const address = target.endsWith("/answer") ? target : `${target}/answer`;
+
+  const conversation = history
+    .map((turn) => `${turn.role === "user" ? "Student" : "You"}: ${turn.content}`)
+    .join("\n\n");
+
+  const response = await fetch(address, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({
+      system: SYSTEM_PROMPT,
+      prompt: conversation ? `${conversation}\n\n${prompt}` : prompt,
+    }),
+    // A local model is slower than a hosted one.
+    signal: AbortSignal.timeout(Number(process.env.ANSWER_TIMEOUT_MS ?? 300_000)),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Answer server failed (${response.status}): ${await response.text()}`);
+  }
+
+  const data = await response.json();
+  return (data.text ?? "").trim();
+}
+
 async function askOllama(prompt: string, history: Turn[]) {
   const host = process.env.OLLAMA_HOST ?? "http://127.0.0.1:11434";
 
@@ -164,8 +201,8 @@ async function askOllama(prompt: string, history: Turn[]) {
 }
 
 /**
- * Picks whichever provider is configured, so the deployed site answers over a
- * hosted model while a laptop with no keys still answers from local Ollama.
+ * Picks whichever provider is configured: a server the operator runs, then a
+ * hosted model, and finally a local Ollama on this machine.
  *
  * `atTime` is where the student has the recording paused, and it goes into the
  * prompt so that "explain this" resolves to the passage on screen.
@@ -177,6 +214,11 @@ export async function generateAnswer(
   atTime: number | null = null,
 ) {
   const prompt = buildUserPrompt(question, segments, atTime);
+
+  const bridge = process.env.ANSWER_URL;
+  if (bridge) {
+    return { text: await askBridge(prompt, history, bridge), provider: "bridged" } as const;
+  }
 
   const openRouterKey = process.env.OPENROUTER_API_KEY;
   if (openRouterKey) {

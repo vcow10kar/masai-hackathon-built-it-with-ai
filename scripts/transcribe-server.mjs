@@ -2,8 +2,9 @@
 /**
  * Turns this machine into a transcription service for the deployed app.
  *
- * The deployment cannot run yt-dlp or whisper.cpp, so it can POST a media URL
- * here instead and get back timestamped segments. Expose it with a tunnel
+ * The deployment cannot run yt-dlp, whisper.cpp or a local language model, so
+ * it can POST here instead: /transcribe returns timestamped segments for a
+ * media URL, and /answer runs a prompt through the local model. Expose it with a tunnel
  * (cloudflared, ngrok) and set TRANSCRIBE_URL and TRANSCRIBE_TOKEN on the
  * deployment to match.
  *
@@ -31,6 +32,8 @@ function log(...parts) {
 const PORT = Number(process.env.PORT ?? 8787);
 const TOKEN = process.env.TRANSCRIBE_TOKEN;
 const MODEL = process.env.WHISPER_MODEL ?? "small.en";
+const ANSWER_MODEL = process.env.ANSWER_MODEL ?? "gpt-oss:20b";
+const OLLAMA_HOST = process.env.OLLAMA_HOST ?? "http://127.0.0.1:11434";
 const MODEL_PATH = join(process.cwd(), "models", `ggml-${MODEL}.bin`);
 
 if (!TOKEN) {
@@ -102,16 +105,74 @@ const server = createServer(async (request, response) => {
   };
 
   if (request.method === "GET" && request.url === "/health") {
-    return send(200, { ok: true, model: MODEL, uptime: since(), requests });
+    return send(200, {
+      ok: true,
+      model: MODEL,
+      answerModel: ANSWER_MODEL,
+      uptime: since(),
+      requests,
+    });
   }
 
-  if (request.method !== "POST" || request.url !== "/transcribe") {
+  const isTranscribe = request.method === "POST" && request.url === "/transcribe";
+  const isAnswer = request.method === "POST" && request.url === "/answer";
+
+  if (!isTranscribe && !isAnswer) {
     return send(404, { error: "Not found" });
   }
 
   if (request.headers.authorization !== `Bearer ${TOKEN}`) {
     log("rejected a request with a bad or missing token");
     return send(401, { error: "Unauthorized" });
+  }
+
+  if (isAnswer) {
+    const tag = `#${++requests}`;
+    let payload;
+
+    try {
+      payload = JSON.parse(await readBody(request));
+    } catch {
+      return send(400, { error: "Expected a JSON body" });
+    }
+
+    const { system, prompt } = payload;
+    if (typeof prompt !== "string" || !prompt.trim()) {
+      return send(400, { error: "prompt is required" });
+    }
+
+    log(`${tag} answering with ${ANSWER_MODEL}, prompt ${prompt.length} chars`);
+    const startedAt = Date.now();
+
+    try {
+      const upstream = await fetch(`${OLLAMA_HOST}/api/chat`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: ANSWER_MODEL,
+          stream: false,
+          // Lecture answers should stick to the excerpts, not improvise.
+          options: { temperature: 0.2 },
+          messages: [
+            ...(typeof system === "string" && system ? [{ role: "system", content: system }] : []),
+            { role: "user", content: prompt },
+          ],
+        }),
+      });
+
+      if (!upstream.ok) {
+        throw new Error(`ollama returned ${upstream.status}: ${await upstream.text()}`);
+      }
+
+      const data = await upstream.json();
+      const text = (data.message?.content ?? "").trim();
+      const elapsed = Math.round((Date.now() - startedAt) / 1000);
+      log(`${tag} answered in ${elapsed}s, ${text.length} chars`);
+      return send(200, { text, model: ANSWER_MODEL });
+    } catch (error) {
+      log(`${tag} answer FAILED after ${Math.round((Date.now() - startedAt) / 1000)}s: ${error.message}`);
+      return send(502, { error: "Answering failed" });
+    }
   }
 
   let url;
@@ -152,7 +213,8 @@ const server = createServer(async (request, response) => {
 
 server.listen(PORT, () => {
   log(`Transcription server listening on http://127.0.0.1:${PORT}`);
-  log(`Model: ${MODEL}`);
+  log(`Transcription model: ${MODEL}`);
+  log(`Answer model: ${ANSWER_MODEL} via ${OLLAMA_HOST}`);
   log(`Expose it with: ngrok http ${PORT}`);
   log("Waiting for requests. Ctrl+C to stop.");
 });
