@@ -87,7 +87,7 @@ by name and never by value.
 | `/` | The workspace: player, transcript, notes and chat. `?lecture=<id>` opens one. |
 | `/library` | Every ingested lecture, with its transcript source and coverage. |
 | `POST /api/ingest` | Builds and stores a transcript. Streams progress as newline-delimited JSON. |
-| `POST /api/ask` | Retrieves passages and returns a cited answer. |
+| `POST /api/ask` | Retrieves passages and returns a cited answer. Also accepts a captured video frame, for a question about that image. |
 | `DELETE /api/lectures/<id>` | Removes a lecture and its transcript from the store. |
 | `GET /api/health` | Which integrations are configured. |
 
@@ -122,6 +122,30 @@ once:
 npm run whisper:model small.en
 ```
 
+## Ask about a paused frame
+
+Open an ingested lecture, pause the recording, and click **Capture frame**
+below the video. For YouTube and remote videos that block direct capture, use
+desktop Chrome or Edge and select the current lecture tab in the browser share
+dialog. The app crops to the video area and stops sharing immediately after
+capture.
+
+The frame appears in chat with its timestamp. Type a specific question and
+click **Ask**, or click **Ask** with an empty input for “What is happening in
+this frame?” The composer resets after the question is sent. Images are held
+in browser memory and sent with the question; they are not saved to the
+lecture library.
+
+Image questions use whichever of `OPENROUTER_API_KEY` or `ANTHROPIC_API_KEY` is
+configured, same provider order as text answers. Set `OPENROUTER_VISION_MODEL`
+in `.env.local` to use another OpenRouter model that accepts images; Anthropic
+answers with the existing `ANTHROPIC_MODEL`. Local Ollama has no vision model
+wired up here, so a laptop running only Ollama gets a clear error for an image
+question instead of a silent failure. Direct same-origin video capture does
+not require tab sharing; YouTube region capture requires a compatible desktop
+browser and HTTPS or localhost. Browser/OS sharing permission is required for
+each capture.
+
 ## Project layout
 
 ```
@@ -136,4 +160,6 @@ supabase/schema.sql the lectures table
 
 - A deployment without `DEEPGRAM_API_KEY` cannot transcribe a video that has no
   captions, since the local Whisper fallback needs a binary.
+- A question about a captured frame needs `OPENROUTER_API_KEY` or
+  `ANTHROPIC_API_KEY`; local Ollama has no vision model wired up.
 - The Notes tab is placeholder content. The Transcript tab is real.

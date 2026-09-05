@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { LectureWorkspace, type WorkspaceLecture } from "@/components/LectureWorkspace";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { getLecture } from "@/lib/store";
 
 type Props = {
@@ -21,15 +22,18 @@ export default async function Home({ searchParams }: Props) {
     : null;
 
   return (
-    <div className="flex min-h-full flex-1 flex-col">
-      <header className="flex shrink-0 items-baseline justify-between gap-4 border-b border-black/10 px-4 py-3 dark:border-white/15">
-        <h1 className="text-sm font-semibold tracking-tight">Ask the Lecture</h1>
-        <Link
-          href="/library"
-          className="text-xs text-black/60 underline-offset-4 hover:underline dark:text-white/60"
-        >
-          Library
-        </Link>
+    <div className="flex min-h-full flex-1 flex-col lg:h-dvh lg:min-h-0 lg:flex-none lg:overflow-hidden">
+      <header className="sticky top-0 z-20 flex shrink-0 items-center justify-between gap-4 border-b border-separator bg-chrome px-5 py-2.5 backdrop-blur-xl backdrop-saturate-150">
+        <h1 className="display text-[20px] leading-none">Ask the Lecture</h1>
+        <div className="flex items-center gap-1">
+          <Link
+            href="/library"
+            className="rounded-full px-3 py-1 text-[13px] font-medium text-accent-ink transition-colors hover:bg-accent-wash"
+          >
+            Library
+          </Link>
+          <ThemeToggle />
+        </div>
       </header>
 
       <LectureWorkspace lecture={workspaceLecture} />

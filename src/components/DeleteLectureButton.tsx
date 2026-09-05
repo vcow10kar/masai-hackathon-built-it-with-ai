@@ -37,7 +37,7 @@ export function DeleteLectureButton({ lectureId, title }: Props) {
       <button
         type="button"
         onClick={() => setConfirming(true)}
-        className="self-center text-black/50 underline-offset-4 hover:underline dark:text-white/50"
+        className="self-center text-muted underline-offset-4 transition-colors hover:text-danger hover:underline"
       >
         Delete
       </button>
@@ -45,14 +45,14 @@ export function DeleteLectureButton({ lectureId, title }: Props) {
   }
 
   return (
-    <span className="flex items-center gap-2">
-      <span className="text-black/60 dark:text-white/60">Delete the transcript?</span>
+    <span className="flex flex-wrap items-center gap-2">
+      <span className="text-muted">Delete the transcript?</span>
       <button
         type="button"
         onClick={remove}
         disabled={pending}
         aria-label={`Delete ${title}`}
-        className="font-medium text-red-600 underline-offset-4 hover:underline disabled:opacity-50 dark:text-red-400"
+        className="font-medium text-danger underline-offset-4 hover:underline disabled:opacity-50"
       >
         {pending ? "Deleting…" : "Delete"}
       </button>
@@ -60,11 +60,11 @@ export function DeleteLectureButton({ lectureId, title }: Props) {
         type="button"
         onClick={() => setConfirming(false)}
         disabled={pending}
-        className="text-black/50 underline-offset-4 hover:underline disabled:opacity-50 dark:text-white/50"
+        className="text-muted underline-offset-4 hover:text-foreground hover:underline disabled:opacity-50"
       >
         Cancel
       </button>
-      {error && <span className="text-red-600 dark:text-red-400">{error}</span>}
+      {error && <span className="text-danger">{error}</span>}
     </span>
   );
 }

@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { formatTimestamp } from "@/lib/format";
+import { activeSegmentIndex } from "@/lib/segments";
 import type { NoteSection, TranscriptSegment } from "@/lib/types";
 
 type Tab = "transcript" | "notes";
@@ -9,67 +10,142 @@ type Tab = "transcript" | "notes";
 type Props = {
   transcript: TranscriptSegment[];
   notes: NoteSection[];
-  activeSegmentId: string | null;
-  onSeek: (seconds: number, segmentId: string) => void;
+  /** Playback position, or null before anything has played. */
+  currentTime: number | null;
+  onSeek: (seconds: number) => void;
 };
 
-export function SourcePanel({ transcript, notes, activeSegmentId, onSeek }: Props) {
+/** Lines fade with distance from the one playing, so the eye lands on it. */
+function opacityFor(distance: number) {
+  if (distance === 0) return 1;
+  if (distance === 1) return 0.6;
+  if (distance === 2) return 0.42;
+  return 0.3;
+}
+
+export function SourcePanel({ transcript, notes, currentTime, onSeek }: Props) {
   const [tab, setTab] = useState<Tab>("transcript");
+  const [following, setFollowing] = useState(true);
+
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const activeRef = useRef<HTMLLIElement>(null);
+
+  const activeIndex = activeSegmentIndex(transcript, currentTime);
+  const activeId = activeIndex >= 0 ? transcript[activeIndex].id : null;
+
+  // Keep the spoken line in view, unless the reader has scrolled away to read
+  // somewhere else.
+  useEffect(() => {
+    if (!following || tab !== "transcript" || !activeRef.current) return;
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    activeRef.current.scrollIntoView({
+      block: "center",
+      behavior: reduced ? "auto" : "smooth",
+    });
+  }, [activeId, following, tab]);
 
   return (
-    <section className="flex min-h-0 flex-col rounded-lg border border-black/10 dark:border-white/15">
-      <div className="flex shrink-0 gap-1 border-b border-black/10 p-1 dark:border-white/15">
-        {(["transcript", "notes"] as const).map((value) => (
+    <section className="panel flex h-full min-h-0 flex-col overflow-hidden rounded-2xl">
+      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-separator px-3 py-2.5">
+        <div className="flex gap-0.5 rounded-[10px] bg-sunken p-0.5">
+          {(["transcript", "notes"] as const).map((value) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setTab(value)}
+              aria-current={tab === value}
+              className={`rounded-lg px-3.5 py-1 text-[13px] font-medium capitalize transition-all duration-200 ${
+                tab === value
+                  ? "bg-segment text-foreground shadow-[0_1px_2px_rgba(0,0,0,0.18)]"
+                  : "text-muted hover:text-foreground"
+              }`}
+            >
+              {value}
+            </button>
+          ))}
+        </div>
+
+        {tab === "transcript" && activeId && !following && (
           <button
-            key={value}
             type="button"
-            onClick={() => setTab(value)}
-            aria-current={tab === value}
-            className={`rounded px-3 py-1.5 text-xs font-medium capitalize transition-colors ${
-              tab === value
-                ? "bg-black/[.06] dark:bg-white/[.10]"
-                : "text-black/60 hover:bg-black/[.04] dark:text-white/60 dark:hover:bg-white/[.06]"
-            }`}
+            onClick={() => setFollowing(true)}
+            className="rounded-full bg-accent-wash px-3 py-1 text-[12px] font-medium text-accent-ink transition-colors hover:bg-accent-wash-hover"
           >
-            {value}
+            Follow along
           </button>
-        ))}
+        )}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-2">
+      <div
+        ref={scrollRef}
+        onWheel={() => setFollowing(false)}
+        onTouchMove={() => setFollowing(false)}
+        className="min-h-0 flex-1 overflow-y-auto p-2"
+      >
         {tab === "transcript" && transcript.length === 0 ? (
-          <p className="p-2 text-sm text-black/50 dark:text-white/50">
+          <p className="p-3 text-[13px] leading-relaxed text-subtle">
             No transcript loaded. Ingest one with{" "}
-            <code className="font-mono text-xs">npm run ingest -- &lt;video url&gt;</code>, then
-            open it from the library.
+            <code className="rounded bg-sunken px-1.5 py-0.5 font-mono text-[12px] text-accent-ink">
+              npm run ingest -- &lt;video url&gt;
+            </code>
+            , then open it from the library.
           </p>
         ) : tab === "transcript" ? (
           <ul className="flex flex-col gap-0.5">
-            {transcript.map((segment) => (
-              <li key={segment.id}>
-                <button
-                  type="button"
-                  onClick={() => onSeek(segment.start, segment.id)}
-                  className={`flex w-full gap-3 rounded p-2 text-left text-sm transition-colors ${
-                    segment.id === activeSegmentId
-                      ? "bg-black/[.06] dark:bg-white/[.10]"
-                      : "hover:bg-black/[.04] dark:hover:bg-white/[.06]"
-                  }`}
-                >
-                  <span className="shrink-0 font-mono text-xs tabular-nums text-black/50 dark:text-white/50">
-                    {formatTimestamp(segment.start)}
-                  </span>
-                  <span className="min-w-0">{segment.text}</span>
-                </button>
-              </li>
-            ))}
+            {transcript.map((segment, index) => {
+              const isActive = index === activeIndex;
+
+              return (
+                <li key={segment.id} ref={isActive ? activeRef : null}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onSeek(segment.start);
+                      setFollowing(true);
+                    }}
+                    aria-current={isActive}
+                    style={{
+                      opacity: activeIndex < 0 ? 1 : opacityFor(Math.abs(index - activeIndex)),
+                    }}
+                    className={`flex w-full items-start gap-2 rounded-xl py-2.5 pl-2 pr-3 text-left transition-all duration-500 ease-out hover:!opacity-100 ${
+                      isActive
+                        ? "bg-accent-wash text-foreground"
+                        : "text-muted hover:bg-fill"
+                    }`}
+                  >
+                    {/* The same amber dot as the scrubber's playhead: one
+                        object, marking the position in two places at once. */}
+                    <span
+                      aria-hidden="true"
+                      className={`mt-[7px] size-1.5 shrink-0 rounded-full bg-accent transition-opacity duration-500 ease-out ${
+                        isActive ? "opacity-100" : "opacity-0"
+                      }`}
+                    />
+                    <span
+                      className={`shrink-0 pt-0.5 font-mono text-[11px] tabular-nums ${
+                        isActive ? "font-medium text-accent-ink" : "text-subtle"
+                      }`}
+                    >
+                      {formatTimestamp(segment.start)}
+                    </span>
+                    <span
+                      className={`min-w-0 text-[13.5px] leading-[1.55] ${
+                        isActive ? "font-medium" : ""
+                      }`}
+                    >
+                      {segment.text}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         ) : (
-          <ul className="flex flex-col gap-3 p-2">
+          <ul className="flex flex-col gap-4 p-3">
             {notes.map((section) => (
               <li key={section.id}>
-                <h3 className="text-sm font-medium">{section.heading}</h3>
-                <p className="text-sm text-black/60 dark:text-white/60">{section.body}</p>
+                <h3 className="overline text-foreground">{section.heading}</h3>
+                <p className="mt-1.5 text-[13.5px] leading-[1.6] text-muted">{section.body}</p>
               </li>
             ))}
           </ul>
