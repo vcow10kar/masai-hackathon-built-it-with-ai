@@ -15,6 +15,7 @@ export type Lecture = {
   source: "captions" | "whisper";
   ingestedAt: string;
   segments: TranscriptSegment[];
+  summary?: string;
 };
 
 type LectureRow = {
@@ -53,6 +54,7 @@ function fromRow(row: LectureRow): Lecture {
     source: row.source,
     ingestedAt: row.ingested_at,
     segments: row.segments,
+    summary: row.segments[0]?.aiSummary,
   };
 }
 
@@ -65,7 +67,9 @@ function toRow(lecture: Lecture): LectureRow {
     duration_seconds: lecture.durationSeconds,
     source: lecture.source,
     ingested_at: lecture.ingestedAt,
-    segments: lecture.segments,
+    segments: lecture.segments.map((segment, index) =>
+      index === 0 && lecture.summary ? { ...segment, aiSummary: lecture.summary } : segment,
+    ),
   };
 }
 

@@ -29,6 +29,7 @@ export type WorkspaceLecture = {
   uploader: string;
   url: string;
   segments: TranscriptSegment[];
+  summary: string | null;
 };
 
 export type WorkspaceLayout = "chat-right" | "sources-right";
@@ -40,7 +41,7 @@ type Props = {
 };
 
 const clampSplit = (value: number, size: number, before: number, after: number) =>
-  Math.min(((size - after - 20) / size) * 100, Math.max((before / size) * 100, value));
+  Math.min(((size - after - 8) / size) * 100, Math.max((before / size) * 100, value));
 
 export function LectureWorkspace({ lecture, initialWorkspace, layout }: Props) {
   const source: VideoSource | null = lecture ? parseVideoSource(lecture.url) : null;
@@ -127,14 +128,14 @@ export function LectureWorkspace({ lecture, initialWorkspace, layout }: Props) {
     const bounds = workspaceRef.current?.getBoundingClientRect();
     if (!bounds) return;
 
-    const width = bounds.width - 40;
-    setPanelSplit(clampSplit(((clientX - bounds.left - 20) / width) * 100, width, 320, 352));
+    const width = bounds.width - 16;
+    setPanelSplit(clampSplit(((clientX - bounds.left - 8) / width) * 100, width, 320, 352));
   }
 
   function handleResizeKey(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
     event.preventDefault();
-    const width = (workspaceRef.current?.clientWidth ?? 0) - 40;
+    const width = (workspaceRef.current?.clientWidth ?? 0) - 16;
     if (width <= 0) return;
     setPanelSplit((current) =>
       clampSplit(current + (event.key === "ArrowLeft" ? -2 : 2), width, 320, 352),
@@ -312,6 +313,10 @@ export function LectureWorkspace({ lecture, initialWorkspace, layout }: Props) {
 
   const sourcesPanel = (
     <SourcePanel
+      key={lecture?.id ?? "empty"}
+      lectureId={lecture?.id ?? null}
+      lectureTitle={lecture?.title ?? "Lecture summary"}
+      storedSummary={lecture?.summary ?? null}
       transcript={transcript}
       notes={notes}
       currentTime={currentTime}
@@ -326,13 +331,13 @@ export function LectureWorkspace({ lecture, initialWorkspace, layout }: Props) {
     <main
       ref={workspaceRef}
       style={{ "--workspace-left": `${panelSplit}%` } as CSSProperties}
-      className="grid min-h-0 flex-1 gap-5 p-5 lg:grid-cols-[clamp(20rem,var(--workspace-left),calc(100%_-_23.25rem))_1.25rem_minmax(22rem,1fr)] lg:gap-0 lg:overflow-hidden"
+      className="grid min-h-0 flex-1 gap-2 p-2 lg:grid-cols-[clamp(20rem,var(--workspace-left),calc(100%_-_22.5rem))_.5rem_minmax(22rem,1fr)] lg:gap-0 lg:overflow-hidden"
     >
-      <div className="flex min-h-0 flex-col gap-5 lg:gap-0 lg:overflow-hidden">
+      <div className="flex min-h-0 flex-col gap-2 lg:gap-0 lg:overflow-hidden">
         <div
           ref={videoStackRef}
           style={{ "--workspace-video": `${videoSplit}%` } as CSSProperties}
-          className="contents lg:grid lg:min-h-0 lg:flex-1 lg:grid-rows-[clamp(16rem,var(--workspace-video),calc(100%_-_13.25rem))_1.25rem_minmax(12rem,1fr)]"
+          className="contents lg:grid lg:min-h-0 lg:flex-1 lg:grid-rows-[clamp(16rem,var(--workspace-video),calc(100%_-_12.5rem))_.5rem_minmax(12rem,1fr)]"
         >
           <LecturePlayer
             key={source ? `${source.kind}:${source.url}` : "empty"}

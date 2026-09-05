@@ -4,14 +4,14 @@ export type TranscriptSegment = {
   start: number;
   end: number;
   text: string;
+  /** Stored once in the first segment's Supabase JSONB object. */
+  aiSummary?: string;
 };
 
 export type NoteSection = {
   id: string;
   heading: string;
   body: string;
-  /** Generated summaries share the existing per-lecture workspace store. */
-  kind?: "note" | "summary";
 };
 
 export type Citation =

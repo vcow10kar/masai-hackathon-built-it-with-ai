@@ -8,6 +8,9 @@ import type { NoteSection, TranscriptSegment } from "@/lib/types";
 export type SourceTab = "transcript" | "summary" | "notes";
 
 type Props = {
+  lectureId: string | null;
+  lectureTitle: string;
+  storedSummary: string | null;
   transcript: TranscriptSegment[];
   notes: NoteSection[];
   /** Playback position, or null before anything has played. */
@@ -26,10 +29,11 @@ function opacityFor(distance: number) {
   return 0.3;
 }
 
-export function SourcePanel({ transcript, notes, currentTime, onSeek, tab, onTabChange, onElaborate }: Props) {
+export function SourcePanel({ lectureId, lectureTitle, storedSummary, transcript, notes, currentTime, onSeek, tab, onTabChange, onElaborate }: Props) {
   const [following, setFollowing] = useState(true);
-  const summary = notes.find((section) => section.kind === "summary");
-  const studyNotes = notes.filter((section) => section.kind !== "summary");
+  const [summary, setSummary] = useState(storedSummary);
+  const [summaryPending, setSummaryPending] = useState(false);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const activeRef = useRef<HTMLLIElement>(null);
@@ -47,6 +51,23 @@ export function SourcePanel({ transcript, notes, currentTime, onSeek, tab, onTab
       behavior: reduced ? "auto" : "smooth",
     });
   }, [activeId, following, tab]);
+
+  async function createSummary() {
+    if (!lectureId || summaryPending) return;
+    setSummaryPending(true);
+    setSummaryError(null);
+
+    try {
+      const response = await fetch(`/api/lectures/${lectureId}/summary`, { method: "POST" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "Could not create the AI summary.");
+      setSummary(data.summary);
+    } catch (error) {
+      setSummaryError(error instanceof Error ? error.message : "Could not create the AI summary.");
+    } finally {
+      setSummaryPending(false);
+    }
+  }
 
   return (
     <section className="panel flex h-full min-h-0 flex-col overflow-hidden rounded-2xl">
@@ -69,7 +90,7 @@ export function SourcePanel({ transcript, notes, currentTime, onSeek, tab, onTab
                   <path d="M8 2.25 9.1 5.4 12.25 6.5 9.1 7.6 8 10.75 6.9 7.6 3.75 6.5 6.9 5.4 8 2.25Zm4.25 7.5.5 1.5 1.5.5-1.5.5-.5 1.5-.5-1.5-1.5-.5 1.5-.5.5-1.5Z" stroke="currentColor" strokeWidth="1.1" strokeLinejoin="round" />
                 </svg>
               )}
-              {value}
+              {value === "summary" ? "AI summary" : value}
             </button>
           ))}
         </div>
@@ -116,9 +137,7 @@ export function SourcePanel({ transcript, notes, currentTime, onSeek, tab, onTab
                     style={{
                       opacity: activeIndex < 0 ? 1 : opacityFor(Math.abs(index - activeIndex)),
                     }}
-                    className={`flex w-full items-start gap-2 rounded-xl py-2.5 pl-2 text-left transition-all duration-500 ease-out hover:!opacity-100 ${
-                      isActive ? "pr-28" : "pr-3"
-                    } ${
+                    className={`flex w-full items-start gap-2 rounded-xl py-2.5 pl-2 pr-3 text-left transition-all duration-500 ease-out hover:!opacity-100 ${
                       isActive
                         ? "bg-accent-wash text-foreground"
                         : "text-muted hover:bg-fill"
@@ -167,10 +186,10 @@ export function SourcePanel({ transcript, notes, currentTime, onSeek, tab, onTab
           summary ? (
             <article className="mx-auto w-full max-w-[72ch] px-4 py-5 sm:px-6">
               <h2 className="display text-balance text-[20px] leading-tight text-foreground">
-                {summary.heading}
+                {lectureTitle}
               </h2>
               <div className="mt-5 space-y-6">
-                {summary.body.split(/\n\s*\n/).map((block, index) => {
+                {summary.split(/\n\s*\n/).map((block, index) => {
                   const [heading, ...content] = block.split("\n");
                   return (
                     <section key={`${heading}-${index}`}>
@@ -185,18 +204,43 @@ export function SourcePanel({ transcript, notes, currentTime, onSeek, tab, onTab
                 })}
               </div>
             </article>
+          ) : summaryPending ? (
+            <div role="status" className="grid min-h-48 place-items-center p-6 text-center">
+              <div>
+                <svg viewBox="0 0 16 16" className="mx-auto size-6 animate-pulse text-accent-ink" fill="none" aria-hidden="true">
+                  <path d="M8 2.25 9.1 5.4 12.25 6.5 9.1 7.6 8 10.75 6.9 7.6 3.75 6.5 6.9 5.4 8 2.25Zm4.25 7.5.5 1.5 1.5.5-1.5.5-.5 1.5-.5-1.5-1.5-.5 1.5-.5.5-1.5Z" stroke="currentColor" strokeWidth="1.1" strokeLinejoin="round" />
+                </svg>
+                <p className="mt-3 text-[13.5px] font-medium text-foreground">Creating your AI summary</p>
+                <p className="mt-1 text-[12px] text-subtle">GPT Sol is reading the full transcript.</p>
+              </div>
+            </div>
           ) : (
-            <p className="p-3 text-[13px] leading-relaxed text-subtle">
-              Add this lecture again to generate its AI summary.
-            </p>
+            <div className="grid min-h-48 place-items-center p-6 text-center">
+              <div>
+                <p className={`text-[13px] leading-relaxed ${summaryError ? "text-danger" : "text-subtle"}`}>
+                  {summaryError ?? "Create a detailed study guide from this lecture’s transcript."}
+                </p>
+                {lectureId && (
+                  <button type="button" onClick={() => void createSummary()} className="mt-4 inline-flex items-center gap-2 rounded-full bg-accent px-4 py-2 text-[13px] font-semibold text-on-accent transition-colors hover:bg-accent-hover">
+                    <svg viewBox="0 0 16 16" className="size-4" fill="none" aria-hidden="true">
+                      <path d="M8 2.25 9.1 5.4 12.25 6.5 9.1 7.6 8 10.75 6.9 7.6 3.75 6.5 6.9 5.4 8 2.25Zm4.25 7.5.5 1.5 1.5.5-1.5.5-.5 1.5-.5-1.5-1.5-.5 1.5-.5.5-1.5Z" stroke="currentColor" strokeWidth="1.1" strokeLinejoin="round" />
+                    </svg>
+                    {summaryError ? "Try again" : "Generate summary"}
+                  </button>
+                )}
+                {!lectureId && (
+                  <p className="mt-2 text-[12px] text-subtle">Open a lecture first.</p>
+                )}
+              </div>
+            </div>
           )
-        ) : studyNotes.length === 0 ? (
+        ) : notes.length === 0 ? (
           <p className="p-3 text-[13px] leading-relaxed text-subtle">
             Notes you create from chat answers will appear here.
           </p>
         ) : (
           <ul className="flex flex-col gap-4 p-3">
-            {studyNotes.map((section) => (
+            {notes.map((section) => (
               <li key={section.id}>
                 <h3 className="overline text-foreground">{section.heading}</h3>
                 <p className="mt-1.5 text-[13.5px] leading-[1.6] text-muted">{section.body}</p>

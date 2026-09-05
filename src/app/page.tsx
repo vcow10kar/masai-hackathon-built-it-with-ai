@@ -29,6 +29,7 @@ export default async function Home({ searchParams }: Props) {
         uploader: lecture.uploader,
         url: lecture.url,
         segments: lecture.segments,
+        summary: lecture.summary ?? null,
       }
     : null;
 
