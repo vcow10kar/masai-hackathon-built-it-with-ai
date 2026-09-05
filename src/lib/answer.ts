@@ -25,6 +25,8 @@ Rules:
 - If neither the image nor the excerpts answer the question, say so.
 - Be brief and concrete. Two or three sentences is usually enough.`;
 
+const OPENROUTER_MODEL = "openai/gpt-5.6-luna";
+
 export type Turn = { role: "user" | "assistant"; content: string };
 
 /** Thrown for a configuration gap the user can fix, surfaced to them as-is. */
@@ -106,16 +108,9 @@ async function askOpenRouter(prompt: string, apiKey: string, history: Turn[], fr
       "X-Title": "Ask the Lecture",
     },
     body: JSON.stringify({
-      // Qwen3.5 9B reads images as well as text, so the same model answers
-      // both kinds of question unless a vision model is configured separately.
-      model: frame
-        ? (process.env.OPENROUTER_VISION_MODEL ?? process.env.OPENROUTER_MODEL ?? "qwen/qwen3.5-9b")
-        : (process.env.OPENROUTER_MODEL ?? "qwen/qwen3.5-9b"),
-      max_tokens: 600,
-      // Qwen3.5 is a reasoning model: left on, it spends the whole token
-      // budget thinking and returns empty content. The answers here are short
-      // lookups over excerpts that are already in front of it.
-      reasoning: { enabled: false },
+      model: OPENROUTER_MODEL,
+      max_tokens: 2048,
+      reasoning: { effort: "medium" },
       messages: [
         { role: "system", content: frame ? VISION_SYSTEM_PROMPT : SYSTEM_PROMPT },
         ...history.map((turn) => ({ role: turn.role, content: turn.content })),
@@ -215,14 +210,14 @@ export async function generateAnswer(
 ) {
   const prompt = buildUserPrompt(question, segments, atTime);
 
-  const bridge = process.env.ANSWER_URL;
-  if (bridge) {
-    return { text: await askBridge(prompt, history, bridge), provider: "bridged" } as const;
-  }
-
   const openRouterKey = process.env.OPENROUTER_API_KEY;
   if (openRouterKey) {
     return { text: await askOpenRouter(prompt, openRouterKey, history), provider: "openrouter" } as const;
+  }
+
+  const bridge = process.env.ANSWER_URL;
+  if (bridge) {
+    return { text: await askBridge(prompt, history, bridge), provider: "bridged" } as const;
   }
 
   const anthropicKey = process.env.ANTHROPIC_API_KEY;

@@ -42,8 +42,8 @@ export default async function LibraryPage() {
           <div className="panel rounded-2xl p-12 text-center">
             <p className="display text-[24px] leading-tight">Nothing ingested yet</p>
             <p className="mx-auto mt-2 max-w-sm text-[13.5px] leading-relaxed text-muted">
-              Paste a lecture URL above and it lands here once transcribed, ready to open and
-              question.
+              Choose New lecture in the workspace and it lands here once transcribed, ready to
+              open and question.
             </p>
             <code className="mt-5 inline-block rounded-lg bg-sunken px-3 py-1.5 font-mono text-[12px] text-accent-ink">
               npm run ingest -- &lt;video url&gt;

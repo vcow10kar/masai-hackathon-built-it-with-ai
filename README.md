@@ -43,12 +43,12 @@ uses hosted services while a laptop with no keys still works offline.
 
 | Provider | Model | Used when |
 | --- | --- | --- |
-| OpenRouter | `openai/gpt-oss-20b` | `OPENROUTER_API_KEY` is set |
+| OpenRouter | `openai/gpt-5.6-luna` | `OPENROUTER_API_KEY` is set |
 | Anthropic | `claude-sonnet-5` | `ANTHROPIC_API_KEY` is set |
 | Ollama | `gpt-oss:20b` | neither key is set, local only |
 
-Model ids are overridable with `OPENROUTER_MODEL`, `ANTHROPIC_MODEL` and
-`OLLAMA_MODEL`.
+All OpenRouter questions, including captured frames, use `openai/gpt-5.6-luna`
+with medium reasoning effort.
 
 ### Transcripts
 
@@ -104,8 +104,29 @@ With no environment variables at all, the app stores transcripts on disk and
 answers with a local Ollama model. That path needs:
 
 ```bash
-brew install yt-dlp
+brew install ollama
+brew services start ollama
 ollama pull gpt-oss:20b
+npm run answer:server
+```
+
+The standalone Node API listens only on this machine. Test it from another
+terminal:
+
+```bash
+curl http://127.0.0.1:8788/answer \
+  -H 'content-type: application/json' \
+  -d '{"prompt":"Say hello in one sentence."}'
+```
+
+Set `ANSWER_URL=http://127.0.0.1:8788` in `.env.local` to make the app use this
+server. On an 8 GB Mac the server uses a 2K context by default; override it with
+`ANSWER_CONTEXT` only if the machine has spare memory.
+
+Local YouTube ingestion also needs:
+
+```bash
+brew install yt-dlp
 ```
 
 For the Supabase-backed path, run `supabase/schema.sql` once in the Supabase
@@ -138,14 +159,13 @@ in browser memory and sent with the question; they are not saved to the
 lecture library.
 
 Image questions use whichever of `OPENROUTER_API_KEY` or `ANTHROPIC_API_KEY` is
-configured, same provider order as text answers. Set `OPENROUTER_VISION_MODEL`
-in `.env.local` to use another OpenRouter model that accepts images; Anthropic
-answers with the existing `ANTHROPIC_MODEL`. Local Ollama has no vision model
-wired up here, so a laptop running only Ollama gets a clear error for an image
-question instead of a silent failure. Direct same-origin video capture does
-not require tab sharing; YouTube region capture requires a compatible desktop
-browser and HTTPS or localhost. Browser/OS sharing permission is required for
-each capture.
+configured, same provider order as text answers. OpenRouter uses GPT-5.6 Luna;
+Anthropic answers with the existing `ANTHROPIC_MODEL`. Local Ollama has no
+vision model wired up here, so a laptop running only Ollama gets a clear error
+for an image question instead of a silent failure. Direct same-origin video
+capture does not require tab sharing; YouTube region capture requires a
+compatible desktop browser and HTTPS or localhost. Browser/OS sharing
+permission is required for each capture.
 
 ### Using this machine as the transcription server
 

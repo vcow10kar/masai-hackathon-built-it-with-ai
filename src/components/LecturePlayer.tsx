@@ -159,8 +159,7 @@ export function LecturePlayer({
   }, []);
 
   // Build the YouTube player for the current video and poll its position,
-  // since the IFrame API reports time only on request. `controls: 0` hands the
-  // whole surface over to our own control bar.
+  // since the IFrame API reports time only on request.
   useEffect(() => {
     if (!youtubeId) return;
 
@@ -175,10 +174,8 @@ export function LecturePlayer({
         playerVars: {
           playsinline: 1,
           rel: 0,
-          controls: 0,
-          disablekb: 1,
+          controls: 1,
           modestbranding: 1,
-          fs: 0,
           iv_load_policy: 3,
         },
         events: {
@@ -358,8 +355,8 @@ export function LecturePlayer({
     }
   }
 
-  // The native shortcuts went away with the native controls, so the shell
-  // carries them for whichever source is loaded.
+  // Direct video files use our control bar, so the shell carries matching
+  // keyboard shortcuts.
   function handleKeyDown(event: React.KeyboardEvent) {
     const target = event.target as HTMLElement;
     if (target instanceof HTMLInputElement || target instanceof HTMLSelectElement) return;
@@ -396,20 +393,9 @@ export function LecturePlayer({
         }`}
       >
         {source?.kind === "youtube" ? (
-          <>
-            <div key={source.videoId} className="size-full">
-              <div ref={youtubeHostRef} className="size-full" />
-            </div>
-            {/* Covers the iframe so YouTube's own click targets and hover
-                chrome never surface; clicks become a play/pause instead. */}
-            <button
-              type="button"
-              onClick={togglePlay}
-              tabIndex={-1}
-              aria-hidden="true"
-              className="absolute inset-0 size-full cursor-pointer"
-            />
-          </>
+          <div key={source.videoId} className="size-full">
+            <div ref={youtubeHostRef} className="size-full" />
+          </div>
         ) : source?.kind === "file" ? (
           <video
             key={source.url}
@@ -474,23 +460,25 @@ export function LecturePlayer({
         <p className="px-1 text-[12px] leading-snug text-danger">{captureError}</p>
       )}
 
-      <VideoControls
-        ready={ready}
-        playing={playing}
-        currentTime={currentTime}
-        duration={duration}
-        volume={volume}
-        muted={muted}
-        rate={rate}
-        fullscreen={fullscreen}
-        onTogglePlay={togglePlay}
-        onSeek={seekTo}
-        onSkip={(delta) => seekTo(currentTime + delta)}
-        onVolumeChange={changeVolume}
-        onToggleMute={toggleMute}
-        onRateChange={changeRate}
-        onToggleFullscreen={toggleFullscreen}
-      />
+      {source?.kind !== "youtube" && (
+        <VideoControls
+          ready={ready}
+          playing={playing}
+          currentTime={currentTime}
+          duration={duration}
+          volume={volume}
+          muted={muted}
+          rate={rate}
+          fullscreen={fullscreen}
+          onTogglePlay={togglePlay}
+          onSeek={seekTo}
+          onSkip={(delta) => seekTo(currentTime + delta)}
+          onVolumeChange={changeVolume}
+          onToggleMute={toggleMute}
+          onRateChange={changeRate}
+          onToggleFullscreen={toggleFullscreen}
+        />
+      )}
     </section>
   );
 }

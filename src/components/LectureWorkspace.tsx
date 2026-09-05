@@ -11,7 +11,6 @@ import {
 import { ChatPanel } from "@/components/ChatPanel";
 import { LecturePlayer, type SeekRequest } from "@/components/LecturePlayer";
 import { SourcePanel, type SourceTab } from "@/components/SourcePanel";
-import { VideoUrlBar } from "@/components/VideoUrlBar";
 import { activeSegmentIndex } from "@/lib/segments";
 import { parseVideoSource, type VideoSource } from "@/lib/video-source";
 import type {
@@ -58,7 +57,6 @@ export function LectureWorkspace({ lecture, initialWorkspace, layout }: Props) {
   const [notes, setNotes] = useState<NoteSection[]>(initialWorkspace.notes);
   const [activeChatId, setActiveChatId] = useState(firstChat.id);
   const [sourceTab, setSourceTab] = useState<SourceTab>("transcript");
-  const [addingNoteId, setAddingNoteId] = useState<string | null>(null);
   const [seekRequest, setSeekRequest] = useState<SeekRequest | null>(null);
   const [currentTime, setCurrentTime] = useState<number | null>(null);
   const [capturedFrame, setCapturedFrame] = useState<FrameAttachment | null>(null);
@@ -273,49 +271,28 @@ export function LectureWorkspace({ lecture, initialWorkspace, layout }: Props) {
     );
   }
 
-  async function addToNotes(message: ChatMessage) {
-    if (!lecture || addingNoteId) return;
-    setAddingNoteId(message.id);
-    try {
-      const atTime = message.citations?.find((citation) => citation.kind === "transcript")?.start;
-      const response = await fetch("/api/ask", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          lectureId: lecture.id,
-          question: `Turn this explanation into a compact study note. Put a short title on the first line and the note on the following lines:\n\n${message.content}`,
-          history: [],
-          atTime,
-        }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error ?? "Could not create the note.");
+  function addToNotes(message: ChatMessage) {
+    const chat = chats.find((item) => item.id === activeChatId);
+    const index = chat?.messages.findIndex((item) => item.id === message.id) ?? -1;
+    const question = index > 0 ? chat?.messages[index - 1]?.content : null;
+    const heading =
+      question
+        ?.replace(/^Elaborate on this part of the lecture:\s*/i, "")
+        .replace(/[“”"]/g, "")
+        .slice(0, 80) || "Study note";
 
-      const lines = String(data.answer)
-        .replace(/\[\s*s\d+\s*]/g, "")
-        .split("\n")
-        .map((line) => line.replace(/^#+\s*/, "").trim())
-        .filter(Boolean);
-      const heading = lines.length > 1 ? lines[0].replace(/^title:\s*/i, "") : "Study note";
-      const body = (lines.length > 1 ? lines.slice(1) : lines)
-        .join("\n")
-        .replace(/^note:\s*/i, "");
-      setNotes((current) => [
-        ...current,
-        { id: crypto.randomUUID(), heading: heading.slice(0, 80), body },
-      ]);
-      setSourceTab("notes");
-    } catch (error) {
-      console.error("Note creation failed", error);
-      const messageText = error instanceof Error ? error.message : "Could not create the note.";
-      setChats((current) =>
-        current.map((chat) =>
-          chat.id === activeChatId ? { ...chat, error: messageText } : chat,
-        ),
-      );
-    } finally {
-      setAddingNoteId(null);
-    }
+    setNotes((current) => [
+      ...current,
+      {
+        id: crypto.randomUUID(),
+        heading,
+        body: message.content.replace(/\[\s*s\d+\s*]/g, "").trim(),
+      },
+    ]);
+    setChats((current) =>
+      current.map((item) => (item.id === activeChatId ? { ...item, error: null } : item)),
+    );
+    setSourceTab("notes");
   }
 
   const chatPanel = (
@@ -330,7 +307,6 @@ export function LectureWorkspace({ lecture, initialWorkspace, layout }: Props) {
       onSend={handleSend}
       onCitationClick={handleCitationClick}
       onAddNote={addToNotes}
-      addingNoteId={addingNoteId}
     />
   );
 
@@ -353,17 +329,15 @@ export function LectureWorkspace({ lecture, initialWorkspace, layout }: Props) {
       className="grid min-h-0 flex-1 gap-5 p-5 lg:grid-cols-[clamp(20rem,var(--workspace-left),calc(100%_-_23.25rem))_1.25rem_minmax(22rem,1fr)] lg:gap-0 lg:overflow-hidden"
     >
       <div className="flex min-h-0 flex-col gap-5 lg:gap-0 lg:overflow-hidden">
-        <VideoUrlBar />
-
         <div
           ref={videoStackRef}
           style={{ "--workspace-video": `${videoSplit}%` } as CSSProperties}
-          className="contents lg:mt-5 lg:grid lg:min-h-0 lg:flex-1 lg:grid-rows-[clamp(16rem,var(--workspace-video),calc(100%_-_13.25rem))_1.25rem_minmax(12rem,1fr)]"
+          className="contents lg:grid lg:min-h-0 lg:flex-1 lg:grid-rows-[clamp(16rem,var(--workspace-video),calc(100%_-_13.25rem))_1.25rem_minmax(12rem,1fr)]"
         >
           <LecturePlayer
             key={source ? `${source.kind}:${source.url}` : "empty"}
             title={lecture?.title ?? "No lecture loaded"}
-            course={lecture?.uploader ?? "Paste a URL or open one from the library"}
+            course={lecture?.uploader ?? "Choose New lecture or open one from the library"}
             source={source}
             seekRequest={seekRequest}
             onTimeChange={handleTimeChange}
