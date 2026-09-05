@@ -17,7 +17,28 @@ type Props = {
   onSend: (question: string, frame?: FrameAttachment, newChat?: boolean) => void;
   onCitationClick: (citation: Citation) => void;
   onAddNote: (message: ChatMessage) => void;
+  onChatDelete: (id: string) => void;
 };
+
+/**
+ * How long ago the thread last gained a message, in the units a student thinks
+ * in. Chats older than a day get a date, since "31 hours ago" means nothing.
+ */
+function lastUpdatedLabel(chat: ChatThread) {
+  // A chat carried over from the server store predates the stamp, so it has a
+  // history without a date on it.
+  if (!chat.updatedAt) return chat.messages.length > 0 ? "earlier" : "empty";
+
+  const when = new Date(chat.updatedAt);
+  const minutes = Math.round((Date.now() - when.getTime()) / 60_000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} min ago`;
+
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+
+  return when.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
 
 /** Citations with no marker in the answer text, so nothing links to them yet. */
 function trailingCitations(message: ChatMessage): Citation[] {
@@ -29,7 +50,9 @@ function trailingCitations(message: ChatMessage): Citation[] {
   );
 }
 
-export function ChatPanel({ chats, activeChatId, disabled, capturedFrame, onChatSelect, onNewChat, onFrameRemove, onSend, onCitationClick, onAddNote }: Props) {
+export function ChatPanel({ chats, activeChatId, disabled, capturedFrame, onChatSelect, onNewChat, onFrameRemove, onSend, onCitationClick, onAddNote, onChatDelete }: Props) {
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const historyRef = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState("");
   const [frameDraft, setFrameDraft] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -39,6 +62,25 @@ export function ChatPanel({ chats, activeChatId, disabled, capturedFrame, onChat
   const messages = activeChat?.messages ?? [];
   const pending = activeChat?.pending ?? false;
   const error = activeChat?.error ?? null;
+
+  // A menu that stays open after the click that dismissed it reads as stuck.
+  useEffect(() => {
+    if (!historyOpen) return;
+
+    const onPointerDown = (event: MouseEvent) => {
+      if (!historyRef.current?.contains(event.target as Node)) setHistoryOpen(false);
+    };
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") setHistoryOpen(false);
+    };
+
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [historyOpen]);
 
   useEffect(() => {
     const scroller = scrollRef.current;
@@ -77,23 +119,107 @@ export function ChatPanel({ chats, activeChatId, disabled, capturedFrame, onChat
 
   return (
     <section className="panel flex h-full min-h-0 flex-col overflow-hidden rounded-2xl">
-      <nav className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-separator px-3 pt-2" aria-label="Chats">
-        {chats.map((chat) => (
-          <button
-            key={chat.id}
-            type="button"
-            aria-pressed={chat.id === activeChatId}
-            onClick={() => onChatSelect(chat.id)}
-            className={`max-w-44 shrink-0 truncate rounded-t-lg border-b-2 px-3 py-2 text-[12.5px] font-medium transition-colors ${chat.id === activeChatId ? "border-accent text-foreground" : "border-transparent text-subtle hover:text-foreground"}`}
-          >
-            {chat.title}
-          </button>
-        ))}
+      <nav className="flex shrink-0 items-center gap-1 border-b border-separator px-3 pt-2" aria-label="Chats">
+        <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {chats.map((chat) => (
+            <span
+              key={chat.id}
+              className={`group flex max-w-44 shrink-0 items-center rounded-t-lg border-b-2 transition-colors ${chat.id === activeChatId ? "border-accent text-foreground" : "border-transparent text-subtle hover:text-foreground"}`}
+            >
+              <button
+                type="button"
+                aria-pressed={chat.id === activeChatId}
+                onClick={() => onChatSelect(chat.id)}
+                title={chat.title}
+                className="min-w-0 truncate py-2 pl-3 pr-1 text-[12.5px] font-medium"
+              >
+                {chat.title}
+              </button>
+              <button
+                type="button"
+                onClick={() => onChatDelete(chat.id)}
+                aria-label={`Close ${chat.title}`}
+                title="Close chat"
+                className="mr-1.5 grid size-5 shrink-0 place-items-center rounded-full text-muted opacity-0 transition-all hover:bg-fill hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+              >
+                <svg viewBox="0 0 16 16" className="size-3" fill="none" aria-hidden="true">
+                  <path d="m4.5 4.5 7 7m0-7-7 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                </svg>
+              </button>
+            </span>
+          ))}
+        </div>
+
         <button type="button" onClick={onNewChat} aria-label="Start a new chat" title="New chat" className="mb-1 grid size-7 shrink-0 place-items-center rounded-full text-muted transition-colors hover:bg-fill hover:text-foreground">
           <svg viewBox="0 0 16 16" className="size-4" fill="none" aria-hidden="true">
             <path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
           </svg>
         </button>
+
+        <div ref={historyRef} className="relative mb-1 shrink-0">
+          <button
+            type="button"
+            onClick={() => setHistoryOpen((open) => !open)}
+            aria-expanded={historyOpen}
+            aria-haspopup="menu"
+            aria-label="Show chat history"
+            title="Chat history"
+            className={`grid size-7 place-items-center rounded-full transition-colors hover:bg-fill hover:text-foreground ${historyOpen ? "bg-fill text-foreground" : "text-muted"}`}
+          >
+            <svg viewBox="0 0 16 16" className="size-4" fill="none" aria-hidden="true">
+              <path d="M8 4.5v3.5l2.25 1.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              <circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="1.5" />
+            </svg>
+          </button>
+
+          {historyOpen && (
+            <div
+              role="menu"
+              className="absolute right-0 top-9 z-20 max-h-80 w-72 overflow-y-auto rounded-xl border border-edge bg-surface p-1 shadow-lg"
+            >
+              {chats.length === 0 ? (
+                <p className="px-3 py-2 text-[12.5px] text-subtle">No chats yet.</p>
+              ) : (
+                [...chats]
+                  // Most recently answered first: that is the one a student
+                  // coming back is looking for.
+                  .sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""))
+                  .map((chat) => (
+                    <div
+                      key={chat.id}
+                      className={`group flex items-center gap-1 rounded-lg px-1 ${chat.id === activeChatId ? "bg-accent-wash" : "hover:bg-fill"}`}
+                    >
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          onChatSelect(chat.id);
+                          setHistoryOpen(false);
+                        }}
+                        className="min-w-0 flex-1 px-2 py-2 text-left"
+                      >
+                        <span className="block truncate text-[12.5px] font-medium text-foreground">{chat.title}</span>
+                        <span className="mt-0.5 block text-[11px] tabular-nums text-subtle">
+                          {chat.messages.length} message{chat.messages.length === 1 ? "" : "s"} · {lastUpdatedLabel(chat)}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onChatDelete(chat.id)}
+                        aria-label={`Delete ${chat.title}`}
+                        title="Delete chat"
+                        className="grid size-7 shrink-0 place-items-center rounded-full text-muted opacity-0 transition-all hover:bg-danger-wash hover:text-danger focus-visible:opacity-100 group-hover:opacity-100"
+                      >
+                        <svg viewBox="0 0 16 16" className="size-3.5" fill="none" aria-hidden="true">
+                          <path d="M3.5 4.5h9m-7 0V3.25a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 .75.75V4.5m1 0v8a1 1 0 0 1-1 1h-5a1 1 0 0 1-1-1v-8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      </button>
+                    </div>
+                  ))
+              )}
+            </div>
+          )}
+        </div>
       </nav>
 
       <div ref={scrollRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-4">

@@ -39,6 +39,8 @@ export type ChatThread = {
   messages: ChatMessage[];
   pending: boolean;
   error: string | null;
+  /** When the thread last gained a message, for the chat history list. */
+  updatedAt?: string;
 };
 
 export type LectureWorkspaceData = {

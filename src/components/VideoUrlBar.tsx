@@ -5,6 +5,7 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { formatTimestamp } from "@/lib/format";
 import { parseVideoSource } from "@/lib/video-source";
+import { useClosedLectures } from "@/lib/local-workspace";
 import type { WorkspaceLayout } from "@/components/LectureWorkspace";
 
 type StreamedSegment = { id: string; start: number; text: string };
@@ -40,6 +41,23 @@ export function VideoUrlBar({ lectures, activeLectureId, layout }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [selectedLectureId, setSelectedLectureId] = useState(activeLectureId);
+  const [closed, setClosed] = useClosedLectures();
+
+  // A closed lecture stays out of the bar until it is opened again, but the one
+  // being watched is always shown: arriving from the library reopens its tab.
+  const openLectures = lectures.filter(
+    (lecture) => lecture.id === activeLectureId || !closed.includes(lecture.id),
+  );
+
+  /** Puts a lecture away without touching the transcript the library holds. */
+  function closeLecture(lectureId: string) {
+    setClosed((current) => (current.includes(lectureId) ? current : [...current, lectureId]));
+
+    if (lectureId !== activeLectureId) return;
+    // The tab being watched has gone, so move to whatever is still open.
+    const next = openLectures.find((lecture) => lecture.id !== lectureId);
+    router.push(next ? `/?lecture=${next.id}&layout=${layout}` : "/");
+  }
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -120,25 +138,40 @@ export function VideoUrlBar({ lectures, activeLectureId, layout }: Props) {
         aria-label="Open lectures"
         className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
-        {lectures.map((lecture) => {
+        {openLectures.map((lecture) => {
           const active = lecture.id === selectedLectureId;
           return (
-            <Link
+            <span
               key={lecture.id}
-              href={{ pathname: "/", query: { lecture: lecture.id, layout } }}
-              scroll={false}
-              onClick={() => setSelectedLectureId(lecture.id)}
-              aria-current={active ? "page" : undefined}
-              title={lecture.title}
-              className={`flex h-9 max-w-52 shrink-0 items-center gap-2 rounded-lg border px-3 text-[12px] font-medium transition-colors ${
+              className={`group flex h-9 max-w-52 shrink-0 items-center rounded-lg border pr-1 text-[12px] font-medium transition-colors ${
                 active
                   ? "border-accent-line bg-accent-wash text-foreground"
                   : "border-edge bg-surface text-muted hover:bg-fill hover:text-foreground"
               }`}
             >
-              <LectureTabIcon />
-              <span className="truncate">{lecture.title}</span>
-            </Link>
+              <Link
+                href={{ pathname: "/", query: { lecture: lecture.id, layout } }}
+                scroll={false}
+                onClick={() => setSelectedLectureId(lecture.id)}
+                aria-current={active ? "page" : undefined}
+                title={lecture.title}
+                className="flex min-w-0 items-center gap-2 py-2 pl-3 pr-1"
+              >
+                <LectureTabIcon />
+                <span className="truncate">{lecture.title}</span>
+              </Link>
+              <button
+                type="button"
+                onClick={() => closeLecture(lecture.id)}
+                aria-label={`Close ${lecture.title}`}
+                title="Close tab, the lecture stays in the library"
+                className="grid size-5 shrink-0 place-items-center rounded-full opacity-0 transition-all hover:bg-fill hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+              >
+                <svg viewBox="0 0 16 16" className="size-3" fill="none" aria-hidden="true">
+                  <path d="m4.5 4.5 7 7m0-7-7 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                </svg>
+              </button>
+            </span>
           );
         })}
       </nav>
