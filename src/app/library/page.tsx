@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { DeleteLectureButton } from "@/components/DeleteLectureButton";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { formatTimestamp } from "@/lib/format";
 import { listLectures } from "@/lib/store";
 
@@ -23,47 +24,57 @@ export default async function LibraryPage() {
 
   return (
     <div className="flex min-h-full flex-1 flex-col">
-      <header className="flex shrink-0 items-baseline justify-between gap-4 border-b border-black/10 px-4 py-3 dark:border-white/15">
-        <h1 className="text-sm font-semibold tracking-tight">Library</h1>
-        <Link href="/" className="text-xs text-black/60 underline-offset-4 hover:underline dark:text-white/60">
-          Back to lecture
-        </Link>
+      <header className="sticky top-0 z-20 flex shrink-0 items-center justify-between gap-4 border-b border-separator bg-chrome px-5 py-2.5 backdrop-blur-xl backdrop-saturate-150">
+        <h1 className="display text-[20px] leading-none">Library</h1>
+        <div className="flex items-center gap-1">
+          <Link
+            href="/"
+            className="rounded-full px-3 py-1 text-[13px] font-medium text-accent-ink transition-colors hover:bg-accent-wash"
+          >
+            Back to lecture
+          </Link>
+          <ThemeToggle />
+        </div>
       </header>
 
-      <main className="mx-auto w-full max-w-3xl flex-1 p-4">
+      <main className="mx-auto w-full max-w-3xl flex-1 p-5">
         {lectures.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-black/15 p-8 text-center dark:border-white/20">
-            <p className="text-sm font-medium">No lectures ingested yet</p>
-            <p className="mt-1 text-sm text-black/60 dark:text-white/60">
-              Add one from the command line:
+          <div className="panel rounded-2xl p-12 text-center">
+            <p className="display text-[24px] leading-tight">Nothing ingested yet</p>
+            <p className="mx-auto mt-2 max-w-sm text-[13.5px] leading-relaxed text-muted">
+              Paste a lecture URL above and it lands here once transcribed, ready to open and
+              question.
             </p>
-            <code className="mt-3 inline-block rounded bg-black/[.06] px-3 py-1.5 font-mono text-xs dark:bg-white/[.10]">
+            <code className="mt-5 inline-block rounded-lg bg-sunken px-3 py-1.5 font-mono text-[12px] text-accent-ink">
               npm run ingest -- &lt;video url&gt;
             </code>
           </div>
         ) : (
-          <ul className="flex flex-col gap-2">
+          <ul className="flex flex-col gap-3">
             {lectures.map((lecture) => {
               const percent = coverage(lecture.coveredSeconds, lecture.durationSeconds);
 
               return (
                 <li
                   key={lecture.id}
-                  className="rounded-lg border border-black/10 p-4 dark:border-white/15"
+                  className="panel panel-hover rounded-2xl p-5 transition-shadow duration-300"
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div className="min-w-0">
-                      <h2 className="truncate text-sm font-medium">{lecture.title}</h2>
-                      <p className="truncate text-xs text-black/50 dark:text-white/50">
-                        {lecture.uploader} · {formatTimestamp(lecture.durationSeconds)}
+                      <h2 className="display truncate text-[19px] leading-snug">{lecture.title}</h2>
+                      <p className="mt-0.5 truncate text-[13px] text-subtle">
+                        {lecture.uploader} ·{" "}
+                        <span className="font-mono tabular-nums">
+                          {formatTimestamp(lecture.durationSeconds)}
+                        </span>
                       </p>
                     </div>
-                    <span className="shrink-0 rounded-full border border-black/15 px-2 py-0.5 text-xs dark:border-white/20">
+                    <span className="shrink-0 rounded-full border border-edge px-2.5 py-0.5 text-[12px] text-muted">
                       {lecture.source === "captions" ? "Captions" : "Whisper"}
                     </span>
                   </div>
 
-                  <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-xs text-black/60 dark:text-white/60">
+                  <dl className="mt-4 flex flex-wrap gap-x-6 gap-y-1 text-[12px] text-muted">
                     <div className="flex gap-1.5">
                       <dt>Segments</dt>
                       <dd className="font-mono tabular-nums text-foreground">{lecture.segmentCount}</dd>
@@ -82,10 +93,10 @@ export default async function LibraryPage() {
                     </div>
                   </dl>
 
-                  <div className="mt-3 flex gap-3 text-xs">
+                  <div className="mt-4 flex items-center gap-4 text-[13px]">
                     <Link
                       href={`/?lecture=${lecture.id}`}
-                      className="rounded bg-foreground px-3 py-1.5 font-medium text-background transition-opacity hover:opacity-90"
+                      className="rounded-full bg-accent px-4 py-1.5 font-medium text-on-accent transition-colors hover:bg-accent-hover"
                     >
                       Open
                     </Link>
@@ -93,7 +104,7 @@ export default async function LibraryPage() {
                       href={lecture.url}
                       target="_blank"
                       rel="noreferrer"
-                      className="self-center text-black/60 underline-offset-4 hover:underline dark:text-white/60"
+                      className="text-muted underline-offset-4 hover:text-foreground hover:underline"
                     >
                       Source video
                     </a>

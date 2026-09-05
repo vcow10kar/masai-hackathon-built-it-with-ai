@@ -2,6 +2,7 @@ import "server-only";
 
 import { formatTimestamp } from "./format";
 import type { RetrievedSegment } from "./retrieval";
+import type { FrameAttachment } from "./types";
 
 const SYSTEM_PROMPT = `You are helping a student revise from one specific lecture.
 
@@ -12,6 +13,21 @@ Rules:
 - If the excerpts do not cover the question, say the lecture does not cover it. Do not answer from your own knowledge.
 - Be brief and concrete. Two or three sentences is usually enough.`;
 
+const VISION_SYSTEM_PROMPT = `You are helping a student revise from one specific lecture. A paused frame from the recording is attached.
+
+Answer using the image and the numbered excerpts from the lecture's transcript below. The student is asking what is shown or discussed at this moment, not what is generally true about the topic.
+
+Rules:
+- Describe only details actually visible in the image. Read on-screen text, labels, diagrams and equations carefully.
+- Cite a transcript excerpt using its id in square brackets, like [s7], whenever a claim also comes from the transcript. Do not invent a citation for something only the image shows.
+- If neither the image nor the excerpts answer the question, say so.
+- Be brief and concrete. Two or three sentences is usually enough.`;
+
+export type Turn = { role: "user" | "assistant"; content: string };
+
+/** Thrown for a configuration gap the user can fix, surfaced to them as-is. */
+export class VisionUnavailableError extends Error {}
+
 function buildUserPrompt(question: string, segments: RetrievedSegment[]) {
   const excerpts = segments
     .map((segment) => `[${segment.id}] (${formatTimestamp(segment.start)}) ${segment.text}`)
@@ -20,7 +36,26 @@ function buildUserPrompt(question: string, segments: RetrievedSegment[]) {
   return `Excerpts from the lecture transcript:\n\n${excerpts}\n\nStudent's question: ${question}`;
 }
 
-async function askAnthropic(question: string, segments: RetrievedSegment[], apiKey: string) {
+function parseDataUrl(dataUrl: string) {
+  const match = /^data:(image\/(?:jpeg|png|webp));base64,(.+)$/.exec(dataUrl);
+  if (!match) throw new Error("Unsupported image format.");
+  return { mediaType: match[1], data: match[2] };
+}
+
+async function askAnthropic(
+  question: string,
+  segments: RetrievedSegment[],
+  apiKey: string,
+  history: Turn[],
+  frame?: FrameAttachment,
+) {
+  const userContent = frame
+    ? [
+        { type: "image", source: { type: "base64", ...parseDataUrl(frame.dataUrl) } },
+        { type: "text", text: buildUserPrompt(question, segments) },
+      ]
+    : buildUserPrompt(question, segments);
+
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -31,8 +66,11 @@ async function askAnthropic(question: string, segments: RetrievedSegment[], apiK
     body: JSON.stringify({
       model: process.env.ANTHROPIC_MODEL ?? "claude-sonnet-5",
       max_tokens: 600,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: "user", content: buildUserPrompt(question, segments) }],
+      system: frame ? VISION_SYSTEM_PROMPT : SYSTEM_PROMPT,
+      messages: [
+        ...history.map((turn) => ({ role: turn.role, content: turn.content })),
+        { role: "user", content: userContent },
+      ],
     }),
   });
 
@@ -48,7 +86,20 @@ async function askAnthropic(question: string, segments: RetrievedSegment[], apiK
     .trim();
 }
 
-async function askOpenRouter(question: string, segments: RetrievedSegment[], apiKey: string) {
+async function askOpenRouter(
+  question: string,
+  segments: RetrievedSegment[],
+  apiKey: string,
+  history: Turn[],
+  frame?: FrameAttachment,
+) {
+  const userContent = frame
+    ? [
+        { type: "text", text: buildUserPrompt(question, segments) },
+        { type: "image_url", image_url: { url: frame.dataUrl } },
+      ]
+    : buildUserPrompt(question, segments);
+
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -57,11 +108,14 @@ async function askOpenRouter(question: string, segments: RetrievedSegment[], api
       "X-Title": "Ask the Lecture",
     },
     body: JSON.stringify({
-      model: process.env.OPENROUTER_MODEL ?? "openai/gpt-oss-20b",
+      model: frame
+        ? (process.env.OPENROUTER_VISION_MODEL ?? "google/gemini-2.5-flash")
+        : (process.env.OPENROUTER_MODEL ?? "openai/gpt-oss-20b"),
       max_tokens: 600,
       messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: buildUserPrompt(question, segments) },
+        { role: "system", content: frame ? VISION_SYSTEM_PROMPT : SYSTEM_PROMPT },
+        ...history.map((turn) => ({ role: turn.role, content: turn.content })),
+        { role: "user", content: userContent },
       ],
     }),
   });
@@ -74,7 +128,7 @@ async function askOpenRouter(question: string, segments: RetrievedSegment[], api
   return (data.choices?.[0]?.message?.content ?? "").trim();
 }
 
-async function askOllama(question: string, segments: RetrievedSegment[]) {
+async function askOllama(question: string, segments: RetrievedSegment[], history: Turn[]) {
   const host = process.env.OLLAMA_HOST ?? "http://127.0.0.1:11434";
 
   const response = await fetch(`${host}/api/chat`, {
@@ -85,6 +139,7 @@ async function askOllama(question: string, segments: RetrievedSegment[]) {
       stream: false,
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
+        ...history.map((turn) => ({ role: turn.role, content: turn.content })),
         { role: "user", content: buildUserPrompt(question, segments) },
       ],
     }),
@@ -102,11 +157,11 @@ async function askOllama(question: string, segments: RetrievedSegment[]) {
  * Picks whichever provider is configured, so the deployed site answers over a
  * hosted model while a laptop with no keys still answers from local Ollama.
  */
-export async function generateAnswer(question: string, segments: RetrievedSegment[]) {
+export async function generateAnswer(question: string, segments: RetrievedSegment[], history: Turn[] = []) {
   const openRouterKey = process.env.OPENROUTER_API_KEY;
   if (openRouterKey) {
     return {
-      text: await askOpenRouter(question, segments, openRouterKey),
+      text: await askOpenRouter(question, segments, openRouterKey, history),
       provider: "openrouter",
     } as const;
   }
@@ -114,12 +169,44 @@ export async function generateAnswer(question: string, segments: RetrievedSegmen
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
   if (anthropicKey) {
     return {
-      text: await askAnthropic(question, segments, anthropicKey),
+      text: await askAnthropic(question, segments, anthropicKey, history),
       provider: "anthropic",
     } as const;
   }
 
-  return { text: await askOllama(question, segments), provider: "ollama" } as const;
+  return { text: await askOllama(question, segments, history), provider: "ollama" } as const;
+}
+
+/**
+ * Same provider fallback as `generateAnswer`, but for a question about a
+ * paused frame. Ollama has no vision model wired up here, so a laptop running
+ * only local Ollama gets a clear instruction instead of a silent failure.
+ */
+export async function generateVisionAnswer(
+  question: string,
+  segments: RetrievedSegment[],
+  frame: FrameAttachment,
+  history: Turn[] = [],
+) {
+  const openRouterKey = process.env.OPENROUTER_API_KEY;
+  if (openRouterKey) {
+    return {
+      text: await askOpenRouter(question, segments, openRouterKey, history, frame),
+      provider: "openrouter",
+    } as const;
+  }
+
+  const anthropicKey = process.env.ANTHROPIC_API_KEY;
+  if (anthropicKey) {
+    return {
+      text: await askAnthropic(question, segments, anthropicKey, history, frame),
+      provider: "anthropic",
+    } as const;
+  }
+
+  throw new VisionUnavailableError(
+    "Image questions need OPENROUTER_API_KEY or ANTHROPIC_API_KEY. Local Ollama has no vision model wired up here.",
+  );
 }
 
 /** Pulls the [s3] markers out of the answer and resolves them to segments. */

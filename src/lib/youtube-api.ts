@@ -1,10 +1,19 @@
 export type YouTubePlayer = {
   seekTo: (seconds: number, allowSeekAhead: boolean) => void;
   playVideo: () => void;
+  pauseVideo: () => void;
   getCurrentTime: () => number;
   getDuration: () => number;
+  getPlayerState: () => number;
+  setVolume: (volume: number) => void;
+  mute: () => void;
+  unMute: () => void;
+  setPlaybackRate: (rate: number) => void;
   destroy: () => void;
 };
+
+/** The subset of YT.PlayerState the controls care about. */
+export const YT_STATE = { ENDED: 0, PLAYING: 1, PAUSED: 2, BUFFERING: 3, CUED: 5 } as const;
 
 type YouTubeNamespace = {
   Player: new (
@@ -12,7 +21,10 @@ type YouTubeNamespace = {
     options: {
       videoId: string;
       playerVars?: Record<string, string | number>;
-      events?: { onReady?: () => void };
+      events?: {
+        onReady?: () => void;
+        onStateChange?: (event: { data: number }) => void;
+      };
     },
   ) => YouTubePlayer;
 };

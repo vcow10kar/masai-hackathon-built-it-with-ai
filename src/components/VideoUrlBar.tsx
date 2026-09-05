@@ -88,7 +88,7 @@ export function VideoUrlBar() {
   }
 
   return (
-    <form onSubmit={submit} className="flex flex-col gap-1">
+    <form onSubmit={submit} className="flex flex-col gap-1.5">
       <div className="flex gap-2">
         <input
           type="url"
@@ -101,31 +101,35 @@ export function VideoUrlBar() {
           placeholder="Paste the lecture video URL"
           aria-label="Lecture video URL"
           aria-invalid={error !== null}
-          className="min-w-0 flex-1 rounded border border-black/15 px-3 py-1.5 text-sm outline-none focus:border-black/40 disabled:opacity-60 dark:border-white/20 dark:focus:border-white/50"
+          className={`min-w-0 flex-1 rounded-full border border-edge bg-surface px-4 py-2 text-[14px] text-foreground placeholder:text-subtle outline-none transition-shadow focus:border-transparent focus:shadow-[0_0_0_1.5px_var(--accent-ink)] focus-visible:outline-none disabled:opacity-60 ${
+            error ? "border-transparent shadow-[0_0_0_1.5px_var(--danger)]" : ""
+          }`}
         />
         <button
           type="submit"
           disabled={value.trim().length === 0 || pending}
-          className="shrink-0 rounded bg-foreground px-4 py-1.5 text-sm font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-40"
+          className="shrink-0 rounded-full bg-accent px-5 py-2 text-[14px] font-medium text-on-accent transition-colors hover:bg-accent-hover disabled:bg-fill disabled:text-subtle"
         >
           {pending ? "Loading…" : "Load"}
         </button>
       </div>
 
-      {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
+      {error && <p className="px-4 text-[12px] text-danger">{error}</p>}
 
       {!error && status && (
-        <p aria-live="polite" className="text-xs text-black/50 dark:text-white/50">
+        <p aria-live="polite" className="px-4 text-[12px] text-subtle">
           {status}
           {pending && "…"}
         </p>
       )}
 
       {preview.length > 0 && (
-        <ul className="flex flex-col gap-0.5 text-xs text-black/40 dark:text-white/40">
+        <ul className="flex flex-col gap-0.5 px-4 text-[12px] text-subtle">
           {preview.map((segment) => (
             <li key={segment.id} className="truncate">
-              <span className="font-mono tabular-nums">{formatTimestamp(segment.start)}</span>{" "}
+              <span className="font-mono tabular-nums text-accent-ink">
+                {formatTimestamp(segment.start)}
+              </span>{" "}
               {segment.text}
             </li>
           ))}

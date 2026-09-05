@@ -1,26 +1,341 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* The theme is a data attribute on <html>, set before paint by the script in
+   the layout, so `dark:` here never depends on the OS alone. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/*
+  Screening room.
+
+  Two colours and no third. Everything the interface draws is black, white, or
+  a grey between them, so the recording is the only thing in the room with any
+  colour in it. Gold is spent on one idea — time — and appears in four
+  strengths: a wash behind the line being spoken, a hairline, an ink for
+  timestamps and links, and a solid fill for the action that starts something.
+  If it is gold, it has to do with where you are in the lecture.
+
+  Light is not an inversion. It is paper under a lamp, the surface you would
+  print a transcript onto, with the same gold as the ink you would mark it in.
+*/
+
+/* Dark is the default: the room the recording is watched in. */
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --background: #0a0a0a;
+  --surface: #151515;
+  --surface-sunken: #050505;
+  --segment: #242424;
+
+  --foreground: #f5f3f0;
+  --muted: #a6a6a6;
+  --subtle: #909090;
+
+  /* Gold, weakest to strongest. */
+  --accent-wash: #241b08;
+  --accent-wash-hover: #33270f;
+  --accent-line: rgba(239, 177, 60, 0.34);
+  --accent-ink: #efb13c;
+  --accent: #efb13c;
+  --accent-hover: #ffc65e;
+  --on-accent: #1a1305;
+
+  --danger: #ff6b5f;
+
+  --separator: rgba(245, 243, 240, 0.1);
+  --edge: rgba(245, 243, 240, 0.08);
+  --edge-light: rgba(245, 243, 240, 0.05);
+  --fill: rgba(245, 243, 240, 0.07);
+  --fill-hover: rgba(245, 243, 240, 0.12);
+
+  --chrome: rgba(10, 10, 10, 0.72);
+
+  --scrollbar: rgba(245, 243, 240, 0.16);
+  --scrollbar-hover: rgba(239, 177, 60, 0.55);
+
+  --shadow-1: 0 1px 1px rgba(0, 0, 0, 0.5), 0 10px 24px -12px rgba(0, 0, 0, 0.85);
+  --shadow-2: 0 2px 4px rgba(0, 0, 0, 0.55), 0 22px 48px -20px rgba(0, 0, 0, 0.9);
+}
+
+/* Paper under a lamp, composed on its own terms. */
+[data-theme="light"] {
+  color-scheme: light;
+
+  --background: #efede9;
+  --surface: #ffffff;
+  --surface-sunken: #e7e5e1;
+  --segment: #ffffff;
+
+  --foreground: #0a0a0a;
+  --muted: #4f4f4f;
+  --subtle: #636363;
+
+  --accent-wash: #f6e8cc;
+  --accent-wash-hover: #efdcb3;
+  --accent-line: rgba(122, 82, 0, 0.3);
+  --accent-ink: #7a5200;
+  --accent: #d99b1f;
+  --accent-hover: #c0860f;
+  --on-accent: #1a1305;
+
+  --danger: #b3261e;
+
+  --separator: rgba(10, 10, 10, 0.12);
+  --edge: rgba(10, 10, 10, 0.1);
+  --edge-light: rgba(255, 255, 255, 0.8);
+  --fill: rgba(10, 10, 10, 0.06);
+  --fill-hover: rgba(10, 10, 10, 0.1);
+
+  --chrome: rgba(239, 237, 233, 0.78);
+
+  --scrollbar: rgba(10, 10, 10, 0.2);
+  --scrollbar-hover: rgba(122, 82, 0, 0.55);
+
+  --shadow-1: 0 1px 2px rgba(20, 16, 8, 0.06), 0 10px 24px -14px rgba(20, 16, 8, 0.22);
+  --shadow-2: 0 2px 4px rgba(20, 16, 8, 0.08), 0 22px 44px -22px rgba(20, 16, 8, 0.3);
 }
 
 @theme inline {
   --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+  --color-surface: var(--surface);
+  --color-sunken: var(--surface-sunken);
+  --color-segment: var(--segment);
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-subtle: var(--subtle);
+
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-wash: var(--accent-wash);
+  --color-accent-wash-hover: var(--accent-wash-hover);
+  --color-accent-line: var(--accent-line);
+  --color-on-accent: var(--on-accent);
+
+  --color-danger: var(--danger);
+  --color-separator: var(--separator);
+  --color-edge: var(--edge);
+  --color-fill: var(--fill);
+  --color-fill-hover: var(--fill-hover);
+  --color-chrome: var(--chrome);
+
+  --font-sans: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --shadow-card: var(--shadow-1);
+  --shadow-raised: var(--shadow-2);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-sans), system-ui, sans-serif;
+  font-family: var(--font-sans);
+  letter-spacing: -0.008em;
+  -webkit-font-smoothing: antialiased;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* ---------------------------------------------------------------------------
+   Browser surfaces. Selection, caret, focus and scrollbars ship in colours
+   that belong to no palette; they are part of this one.
+   --------------------------------------------------------------------------- */
+
+::selection {
+  background: var(--accent-wash);
+  color: var(--foreground);
+}
+
+:root {
+  /* Checkboxes, the range fallback and the native select popup. */
+  accent-color: var(--accent);
+  caret-color: var(--accent-ink);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent-ink);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+a {
+  text-underline-offset: 0.2em;
+  text-decoration-thickness: from-font;
+}
+
+/* Explicit rather than assumed: Safari's UA stylesheet leaves buttons at the
+   default arrow, so every clickable control names its own cursor. */
+button:not(:disabled),
+[role="button"],
+a[href],
+label[for],
+select,
+summary {
+  cursor: pointer;
+}
+
+button:disabled,
+[aria-disabled="true"] {
+  cursor: not-allowed;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--scrollbar);
+  border: 2px solid transparent;
+  background-clip: content-box;
+  border-radius: 999px;
+  transition: background-color 0.2s ease;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-hover);
+  background-clip: content-box;
+}
+
+/* ---------------------------------------------------------------------------
+   Panels. Lit rectangles standing off a dark room: a hairline edge, a catch of
+   light along the top, and a shadow with a real offset underneath.
+   --------------------------------------------------------------------------- */
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--edge);
+  box-shadow: inset 0 1px 0 var(--edge-light), var(--shadow-1);
+}
+
+.panel-raised,
+.panel-hover:hover {
+  box-shadow: inset 0 1px 0 var(--edge-light), var(--shadow-2);
+}
+
+/* The wordmark and lecture titles. Manrope's heavy end, drawn in tight — a
+   change of volume rather than a change of voice. */
+.display {
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  line-height: 1.1;
+}
+
+/* Small labels that name a region rather than a thing. */
+.overline {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   The player's sliders. The elapsed portion is painted with a gradient that
+   stops at --progress, since the track cannot be split any other way.
+   --------------------------------------------------------------------------- */
+
+.player-range {
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+  touch-action: none;
+  /* The box stays 4px tall always; only its transform animates, so
+     thickening the track on hover never triggers layout. */
+  --track-scale: 1;
+}
+
+.player-range:hover:not(:disabled),
+.player-range:focus-visible,
+.player-range:active {
+  --track-scale: 1.5;
+}
+
+.player-range:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.player-range::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    var(--accent) var(--progress, 0%),
+    var(--fill) var(--progress, 0%)
+  );
+  transform: scaleY(var(--track-scale));
+  transform-origin: center;
+  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.player-range::-moz-range-track {
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    var(--accent) var(--progress, 0%),
+    var(--fill) var(--progress, 0%)
+  );
+  transform: scaleY(var(--track-scale));
+  transform-origin: center;
+  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* The playhead is the one thing on the page that is always lit. Its
+   margin is centered against the track's fixed 4px box — the track's
+   thickening is a transform, which never moves the thumb's own layout. */
+.player-range::-webkit-slider-thumb {
+  appearance: none;
+  height: 10px;
+  width: 10px;
+  margin-top: -3px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--surface), 0 1px 3px rgba(0, 0, 0, 0.45);
+  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.player-range::-moz-range-thumb {
+  height: 10px;
+  width: 10px;
+  border: none;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--surface), 0 1px 3px rgba(0, 0, 0, 0.45);
+  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.player-range:hover:not(:disabled)::-webkit-slider-thumb,
+.player-range:focus-visible::-webkit-slider-thumb,
+.player-range:active::-webkit-slider-thumb {
+  transform: scale(1.45);
+}
+
+.player-range:hover:not(:disabled)::-moz-range-thumb,
+.player-range:focus-visible::-moz-range-thumb,
+.player-range:active::-moz-range-thumb {
+  transform: scale(1.45);
+}
+
+.player-range:disabled::-webkit-slider-thumb {
+  transform: scale(0);
+}
+
+.player-range:disabled::-moz-range-thumb {
+  transform: scale(0);
 }
