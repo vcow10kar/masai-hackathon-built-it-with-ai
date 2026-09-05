@@ -30,3 +30,16 @@ export type ChatMessage = {
   frame?: FrameAttachment;
   citations?: Citation[];
 };
+
+export type ChatThread = {
+  id: string;
+  title: string;
+  messages: ChatMessage[];
+  pending: boolean;
+  error: string | null;
+};
+
+export type LectureWorkspaceData = {
+  chats: ChatThread[];
+  notes: NoteSection[];
+};

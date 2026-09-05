@@ -1,17 +1,26 @@
 "use client";
 
-import { useRef, useState } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+  type PointerEvent,
+} from "react";
 import { ChatPanel } from "@/components/ChatPanel";
 import { LecturePlayer, type SeekRequest } from "@/components/LecturePlayer";
-import { SourcePanel } from "@/components/SourcePanel";
+import { SourcePanel, type SourceTab } from "@/components/SourcePanel";
 import { VideoUrlBar } from "@/components/VideoUrlBar";
-import { sampleNotes } from "@/lib/sample-data";
 import { activeSegmentIndex } from "@/lib/segments";
 import { parseVideoSource, type VideoSource } from "@/lib/video-source";
 import type {
   ChatMessage,
+  ChatThread,
   Citation,
   FrameAttachment,
+  LectureWorkspaceData,
+  NoteSection,
   TranscriptSegment,
 } from "@/lib/types";
 
@@ -23,20 +32,59 @@ export type WorkspaceLecture = {
   segments: TranscriptSegment[];
 };
 
+export type WorkspaceLayout = "chat-right" | "sources-right";
+
 type Props = {
   lecture: WorkspaceLecture | null;
+  initialWorkspace: LectureWorkspaceData;
+  layout: WorkspaceLayout;
 };
 
-export function LectureWorkspace({ lecture }: Props) {
+const clampSplit = (value: number, size: number, before: number, after: number) =>
+  Math.min(((size - after - 20) / size) * 100, Math.max((before / size) * 100, value));
+
+export function LectureWorkspace({ lecture, initialWorkspace, layout }: Props) {
   const source: VideoSource | null = lecture ? parseVideoSource(lecture.url) : null;
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const firstChat = initialWorkspace.chats[0] ?? {
+    id: "chat-1",
+    title: "Chat 1",
+    messages: [],
+    pending: false,
+    error: null,
+  };
+  const [chats, setChats] = useState<ChatThread[]>(
+    initialWorkspace.chats.length ? initialWorkspace.chats : [firstChat],
+  );
+  const [notes, setNotes] = useState<NoteSection[]>(initialWorkspace.notes);
+  const [activeChatId, setActiveChatId] = useState(firstChat.id);
+  const [sourceTab, setSourceTab] = useState<SourceTab>("transcript");
+  const [addingNoteId, setAddingNoteId] = useState<string | null>(null);
   const [seekRequest, setSeekRequest] = useState<SeekRequest | null>(null);
   const [currentTime, setCurrentTime] = useState<number | null>(null);
   const [capturedFrame, setCapturedFrame] = useState<FrameAttachment | null>(null);
+  const [panelSplit, setPanelSplit] = useState(61);
+  const [videoSplit, setVideoSplit] = useState(60);
+  const workspaceRef = useRef<HTMLElement>(null);
+  const videoStackRef = useRef<HTMLDivElement>(null);
 
   const transcript = lecture?.segments ?? [];
+
+  useEffect(() => {
+    if (!lecture) return;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => {
+      void fetch(`/api/lectures/${lecture.id}/workspace`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ chats, notes }),
+        signal: controller.signal,
+      });
+    }, 350);
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [chats, lecture, notes]);
 
   // The player reports its position several times a second; the transcript
   // only cares which segment is being spoken, so re-render when that changes.
@@ -68,81 +116,322 @@ export function LectureWorkspace({ lecture }: Props) {
     }
   }
 
-  async function handleSend(question: string, frame?: FrameAttachment) {
+  function addChat() {
+    const id = crypto.randomUUID();
+    setChats((current) => [
+      ...current,
+      { id, title: `Chat ${current.length + 1}`, messages: [], pending: false, error: null },
+    ]);
+    setActiveChatId(id);
+  }
+
+  function resizePanels(clientX: number) {
+    const bounds = workspaceRef.current?.getBoundingClientRect();
+    if (!bounds) return;
+
+    const width = bounds.width - 40;
+    setPanelSplit(clampSplit(((clientX - bounds.left - 20) / width) * 100, width, 320, 352));
+  }
+
+  function handleResizeKey(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const width = (workspaceRef.current?.clientWidth ?? 0) - 40;
+    if (width <= 0) return;
+    setPanelSplit((current) =>
+      clampSplit(current + (event.key === "ArrowLeft" ? -2 : 2), width, 320, 352),
+    );
+  }
+
+  function handleResizeStart(event: PointerEvent<HTMLDivElement>) {
+    if (event.button !== 0) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    resizePanels(event.clientX);
+  }
+
+  function resizeVideo(clientY: number) {
+    const bounds = videoStackRef.current?.getBoundingClientRect();
+    if (!bounds) return;
+    setVideoSplit(
+      clampSplit(((clientY - bounds.top) / bounds.height) * 100, bounds.height, 256, 192),
+    );
+  }
+
+  function handleVideoResizeKey(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+    event.preventDefault();
+    const height = videoStackRef.current?.clientHeight ?? 0;
+    if (height <= 0) return;
+    setVideoSplit((current) =>
+      clampSplit(current + (event.key === "ArrowUp" ? -2 : 2), height, 256, 192),
+    );
+  }
+
+  function handleVideoResizeStart(event: PointerEvent<HTMLDivElement>) {
+    if (event.button !== 0) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    resizeVideo(event.clientY);
+  }
+
+  async function handleSend(
+    question: string,
+    frame?: FrameAttachment,
+    newChat = false,
+    atTime = currentTime,
+  ) {
     if (!lecture) return;
 
     const askedAt = Date.now();
-    const history = messages.map(({ role, content }) => ({ role, content }));
+    const chatId = newChat ? crypto.randomUUID() : activeChatId;
+    const currentChat = chats.find((chat) => chat.id === activeChatId);
+    const history = newChat
+      ? []
+      : (currentChat?.messages ?? []).map(({ role, content }) => ({ role, content }));
+    const userMessage: ChatMessage = {
+      id: `${askedAt}-user`,
+      role: "user",
+      content: question,
+      frame,
+    };
 
-    setMessages((current) => [
-      ...current,
-      { id: `${askedAt}-user`, role: "user", content: question, frame },
-    ]);
-    setError(null);
-    setPending(true);
+    if (newChat) {
+      setChats((current) => [
+        ...current,
+        {
+          id: chatId,
+          title: question.length > 28 ? `${question.slice(0, 28)}…` : question,
+          messages: [userMessage],
+          pending: true,
+          error: null,
+        },
+      ]);
+      setActiveChatId(chatId);
+    } else {
+      setChats((current) =>
+        current.map((chat) =>
+          chat.id === chatId
+            ? { ...chat, messages: [...chat.messages, userMessage], pending: true, error: null }
+            : chat,
+        ),
+      );
+    }
 
     try {
       const response = await fetch("/api/ask", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ lectureId: lecture.id, question, history, frame }),
+        // The playhead goes along so that "explain this" resolves to whatever
+        // is on screen rather than to a keyword match elsewhere in the lecture.
+        body: JSON.stringify({
+          lectureId: lecture.id,
+          question,
+          history,
+          frame,
+          atTime: frame?.timestamp ?? atTime,
+        }),
       });
 
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "Request failed.");
 
-      setMessages((current) => [
-        ...current,
-        {
-          id: `${askedAt}-assistant`,
-          role: "assistant",
-          content: data.answer,
-          citations: data.citations,
-        },
-      ]);
+      setChats((current) =>
+        current.map((chat) =>
+          chat.id === chatId
+            ? {
+                ...chat,
+                messages: [
+                  ...chat.messages,
+                  {
+                    id: `${askedAt}-assistant`,
+                    role: "assistant",
+                    content: data.answer,
+                    citations: data.citations,
+                  },
+                ],
+              }
+            : chat,
+        ),
+      );
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not reach the answer service.");
+      const message = cause instanceof Error ? cause.message : "Could not reach the answer service.";
+      setChats((current) =>
+        current.map((chat) => (chat.id === chatId ? { ...chat, error: message } : chat)),
+      );
     } finally {
-      setPending(false);
+      setChats((current) =>
+        current.map((chat) => (chat.id === chatId ? { ...chat, pending: false } : chat)),
+      );
     }
   }
 
+  function elaborate(segment: TranscriptSegment) {
+    void handleSend(
+      `Elaborate on this part of the lecture: “${segment.text}”`,
+      undefined,
+      true,
+      segment.start,
+    );
+  }
+
+  async function addToNotes(message: ChatMessage) {
+    if (!lecture || addingNoteId) return;
+    setAddingNoteId(message.id);
+    try {
+      const atTime = message.citations?.find((citation) => citation.kind === "transcript")?.start;
+      const response = await fetch("/api/ask", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          lectureId: lecture.id,
+          question: `Turn this explanation into a compact study note. Put a short title on the first line and the note on the following lines:\n\n${message.content}`,
+          history: [],
+          atTime,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "Could not create the note.");
+
+      const lines = String(data.answer)
+        .replace(/\[\s*s\d+\s*]/g, "")
+        .split("\n")
+        .map((line) => line.replace(/^#+\s*/, "").trim())
+        .filter(Boolean);
+      const heading = lines.length > 1 ? lines[0].replace(/^title:\s*/i, "") : "Study note";
+      const body = (lines.length > 1 ? lines.slice(1) : lines)
+        .join("\n")
+        .replace(/^note:\s*/i, "");
+      setNotes((current) => [
+        ...current,
+        { id: crypto.randomUUID(), heading: heading.slice(0, 80), body },
+      ]);
+      setSourceTab("notes");
+    } catch (error) {
+      console.error("Note creation failed", error);
+      const messageText = error instanceof Error ? error.message : "Could not create the note.";
+      setChats((current) =>
+        current.map((chat) =>
+          chat.id === activeChatId ? { ...chat, error: messageText } : chat,
+        ),
+      );
+    } finally {
+      setAddingNoteId(null);
+    }
+  }
+
+  const chatPanel = (
+    <ChatPanel
+      chats={chats}
+      activeChatId={activeChatId}
+      disabled={lecture === null}
+      capturedFrame={capturedFrame}
+      onChatSelect={setActiveChatId}
+      onNewChat={addChat}
+      onFrameRemove={() => setCapturedFrame(null)}
+      onSend={handleSend}
+      onCitationClick={handleCitationClick}
+      onAddNote={addToNotes}
+      addingNoteId={addingNoteId}
+    />
+  );
+
+  const sourcesPanel = (
+    <SourcePanel
+      transcript={transcript}
+      notes={notes}
+      currentTime={currentTime}
+      onSeek={seek}
+      tab={sourceTab}
+      onTabChange={setSourceTab}
+      onElaborate={elaborate}
+    />
+  );
+
   return (
-    <main className="grid min-h-0 flex-1 gap-5 p-5 lg:grid-cols-[minmax(0,1.55fr)_minmax(22rem,1fr)] lg:overflow-hidden">
-      <div className="flex min-h-0 flex-col gap-5 lg:overflow-hidden">
+    <main
+      ref={workspaceRef}
+      style={{ "--workspace-left": `${panelSplit}%` } as CSSProperties}
+      className="grid min-h-0 flex-1 gap-5 p-5 lg:grid-cols-[clamp(20rem,var(--workspace-left),calc(100%_-_23.25rem))_1.25rem_minmax(22rem,1fr)] lg:gap-0 lg:overflow-hidden"
+    >
+      <div className="flex min-h-0 flex-col gap-5 lg:gap-0 lg:overflow-hidden">
         <VideoUrlBar />
 
-        <LecturePlayer
-          key={source ? `${source.kind}:${source.url}` : "empty"}
-          title={lecture?.title ?? "No lecture loaded"}
-          course={lecture?.uploader ?? "Paste a URL or open one from the library"}
-          source={source}
-          seekRequest={seekRequest}
-          onTimeChange={handleTimeChange}
-          onCapture={setCapturedFrame}
-        />
-
-        <div className="min-h-72 flex-1 overflow-hidden lg:min-h-0">
-          <ChatPanel
-            messages={messages}
-            pending={pending}
-            disabled={lecture === null}
-            error={error}
-            capturedFrame={capturedFrame}
-            onFrameRemove={() => setCapturedFrame(null)}
-            onSend={handleSend}
-            onCitationClick={handleCitationClick}
+        <div
+          ref={videoStackRef}
+          style={{ "--workspace-video": `${videoSplit}%` } as CSSProperties}
+          className="contents lg:mt-5 lg:grid lg:min-h-0 lg:flex-1 lg:grid-rows-[clamp(16rem,var(--workspace-video),calc(100%_-_13.25rem))_1.25rem_minmax(12rem,1fr)]"
+        >
+          <LecturePlayer
+            key={source ? `${source.kind}:${source.url}` : "empty"}
+            title={lecture?.title ?? "No lecture loaded"}
+            course={lecture?.uploader ?? "Paste a URL or open one from the library"}
+            source={source}
+            seekRequest={seekRequest}
+            onTimeChange={handleTimeChange}
+            onCapture={setCapturedFrame}
           />
+
+          <div
+            role="separator"
+            aria-label={`Resize video and ${layout === "chat-right" ? "sources" : "chat"} panels`}
+            aria-orientation="horizontal"
+            aria-valuenow={Math.round(videoSplit)}
+            tabIndex={0}
+            onKeyDown={handleVideoResizeKey}
+            onPointerDown={handleVideoResizeStart}
+            onPointerMove={(event) =>
+              event.currentTarget.hasPointerCapture(event.pointerId) && resizeVideo(event.clientY)
+            }
+            onPointerUp={(event) =>
+              event.currentTarget.hasPointerCapture(event.pointerId) &&
+              event.currentTarget.releasePointerCapture(event.pointerId)
+            }
+            onPointerCancel={(event) =>
+              event.currentTarget.hasPointerCapture(event.pointerId) &&
+              event.currentTarget.releasePointerCapture(event.pointerId)
+            }
+            className="group relative z-10 hidden touch-none cursor-row-resize select-none lg:block"
+          >
+            <span
+              aria-hidden="true"
+              className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-separator transition-colors group-hover:bg-accent-ink group-focus-visible:bg-accent-ink"
+            />
+          </div>
+
+          <div className="min-h-72 flex-1 overflow-hidden lg:min-h-0">
+            {layout === "chat-right" ? sourcesPanel : chatPanel}
+          </div>
         </div>
       </div>
 
-      <div className="min-h-[28rem] overflow-hidden lg:min-h-0">
-        <SourcePanel
-          transcript={transcript}
-          notes={sampleNotes}
-          currentTime={currentTime}
-          onSeek={seek}
+      <div
+        role="separator"
+        aria-label="Resize panels"
+        aria-orientation="vertical"
+        aria-valuenow={Math.round(panelSplit)}
+        tabIndex={0}
+        onKeyDown={handleResizeKey}
+        onPointerDown={handleResizeStart}
+        onPointerMove={(event) =>
+          event.currentTarget.hasPointerCapture(event.pointerId) && resizePanels(event.clientX)
+        }
+        onPointerUp={(event) =>
+          event.currentTarget.hasPointerCapture(event.pointerId) &&
+          event.currentTarget.releasePointerCapture(event.pointerId)
+        }
+        onPointerCancel={(event) =>
+          event.currentTarget.hasPointerCapture(event.pointerId) &&
+          event.currentTarget.releasePointerCapture(event.pointerId)
+        }
+        className="group relative z-10 hidden touch-none cursor-col-resize select-none lg:block"
+      >
+        <span
+          aria-hidden="true"
+          className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-separator transition-colors group-hover:bg-accent-ink group-focus-visible:bg-accent-ink"
         />
+      </div>
+
+      <div className="min-h-[28rem] overflow-hidden lg:min-h-0">
+        {layout === "chat-right" ? chatPanel : sourcesPanel}
       </div>
     </main>
   );

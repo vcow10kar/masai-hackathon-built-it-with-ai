@@ -20,3 +20,14 @@ create index if not exists lectures_ingested_at_idx
 -- The app reaches Supabase only from server routes using the service role key,
 -- so no client-side policies are needed. RLS stays on to block anon access.
 alter table public.lectures enable row level security;
+
+-- One saved set of chats and notes per lecture. The browser never receives
+-- the service role key; reads and writes go through Next.js route handlers.
+create table if not exists public.lecture_workspaces (
+  lecture_id text primary key references public.lectures(id) on delete cascade,
+  chats jsonb not null default '[]'::jsonb,
+  notes jsonb not null default '[]'::jsonb,
+  updated_at timestamptz not null default now()
+);
+
+alter table public.lecture_workspaces enable row level security;

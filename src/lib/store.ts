@@ -3,7 +3,7 @@ import "server-only";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { TranscriptSegment } from "./types";
+import type { ChatThread, LectureWorkspaceData, NoteSection, TranscriptSegment } from "./types";
 
 export type Lecture = {
   id: string;
@@ -29,6 +29,7 @@ type LectureRow = {
 };
 
 const LECTURE_DIR = join(process.cwd(), "data", "lectures");
+const WORKSPACE_DIR = join(process.cwd(), "data", "workspaces");
 
 function supabase(): SupabaseClient | null {
   const url = process.env.SUPABASE_URL;
@@ -154,4 +155,58 @@ export async function deleteLecture(id: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+function settledChats(chats: ChatThread[]) {
+  return chats.map((chat) => ({ ...chat, pending: false, error: null }));
+}
+
+export async function getLectureWorkspace(lectureId: string): Promise<LectureWorkspaceData> {
+  if (!/^[\w-]+$/.test(lectureId)) return { chats: [], notes: [] };
+
+  const client = supabase();
+  if (client) {
+    const { data, error } = await client
+      .from("lecture_workspaces")
+      .select("chats, notes")
+      .eq("lecture_id", lectureId)
+      .maybeSingle();
+    if (error) throw new Error(`Supabase workspace read failed: ${error.message}`);
+    return data
+      ? { chats: settledChats(data.chats as ChatThread[]), notes: data.notes as NoteSection[] }
+      : { chats: [], notes: [] };
+  }
+
+  try {
+    const data = JSON.parse(
+      await readFile(join(WORKSPACE_DIR, `${lectureId}.json`), "utf8"),
+    ) as LectureWorkspaceData;
+    return { chats: settledChats(data.chats), notes: data.notes };
+  } catch {
+    return { chats: [], notes: [] };
+  }
+}
+
+export async function saveLectureWorkspace(
+  lectureId: string,
+  workspace: LectureWorkspaceData,
+): Promise<void> {
+  if (!/^[\w-]+$/.test(lectureId)) throw new Error("Invalid lecture id.");
+  const saved = { chats: settledChats(workspace.chats), notes: workspace.notes };
+  const client = supabase();
+  if (client) {
+    const { error } = await client.from("lecture_workspaces").upsert({
+      lecture_id: lectureId,
+      ...saved,
+      updated_at: new Date().toISOString(),
+    });
+    if (error) throw new Error(`Supabase workspace write failed: ${error.message}`);
+    return;
+  }
+
+  await mkdir(WORKSPACE_DIR, { recursive: true });
+  await writeFile(
+    join(WORKSPACE_DIR, `${lectureId}.json`),
+    `${JSON.stringify(saved, null, 2)}\n`,
+  );
 }

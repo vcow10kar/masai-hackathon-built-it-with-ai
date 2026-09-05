@@ -1,5 +1,11 @@
 import { NextResponse } from "next/server";
-import { extractCitations, generateAnswer, generateVisionAnswer, VisionUnavailableError } from "@/lib/answer";
+import {
+  extractCitations,
+  generateAnswer,
+  generateVisionAnswer,
+  stripUnknownCitations,
+  VisionUnavailableError,
+} from "@/lib/answer";
 import { getLecture } from "@/lib/store";
 import { retrieve } from "@/lib/retrieval";
 import type { FrameAttachment } from "@/lib/types";
@@ -43,7 +49,13 @@ function frameAttachment(value: unknown): FrameAttachment | null {
 }
 
 export async function POST(request: Request) {
-  let body: { lectureId?: unknown; question?: unknown; history?: unknown; frame?: unknown };
+  let body: {
+    lectureId?: unknown;
+    question?: unknown;
+    history?: unknown;
+    frame?: unknown;
+    atTime?: unknown;
+  };
   try {
     body = await request.json();
   } catch {
@@ -53,6 +65,12 @@ export async function POST(request: Request) {
   const lectureId = typeof body.lectureId === "string" ? body.lectureId : "";
   const question = typeof body.question === "string" ? body.question.trim() : "";
   const history = historyTurns(body.history);
+  // Where the player is paused. Optional: a question asked before playback
+  // starts is still a fair question about the lecture as a whole.
+  const atTime =
+    typeof body.atTime === "number" && Number.isFinite(body.atTime) && body.atTime >= 0
+      ? body.atTime
+      : null;
 
   if (!lectureId || !question) {
     return NextResponse.json({ error: "lectureId and question are required." }, { status: 400 });
@@ -68,7 +86,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "That lecture has not been ingested." }, { status: 404 });
   }
 
-  const retrieved = retrieve(lecture.segments, question);
+  const retrieved = retrieve(lecture.segments, question, {
+    atTime: frame ? frame.timestamp : atTime,
+  });
   if (!frame && retrieved.length === 0) {
     return NextResponse.json({
       answer: "I could not find anything about that in this lecture.",
@@ -79,11 +99,23 @@ export async function POST(request: Request) {
   try {
     const { text, provider } = frame
       ? await generateVisionAnswer(question, retrieved, frame, history)
-      : await generateAnswer(question, retrieved, history);
+      : await generateAnswer(question, retrieved, history, atTime);
+
+    const citations = extractCitations(text, retrieved);
+
+    // Asked about the moment on screen, models often answer without citing
+    // anything, which leaves nothing to click. The passage at the playhead is
+    // where that answer came from, so offer it as the way back.
+    if (citations.length === 0) {
+      const anchor = retrieved.find((segment) => segment.anchored);
+      if (anchor) {
+        citations.push({ kind: "transcript", segmentId: anchor.id, start: anchor.start });
+      }
+    }
 
     return NextResponse.json({
-      answer: text,
-      citations: extractCitations(text, retrieved),
+      answer: stripUnknownCitations(text, retrieved),
+      citations,
       provider,
     });
   } catch (error) {

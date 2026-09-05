@@ -386,7 +386,7 @@ export function LecturePlayer({
       ref={shellRef}
       onKeyDown={handleKeyDown}
       className={`flex flex-col gap-3 bg-surface p-3 ${
-        fullscreen ? "justify-center" : "panel rounded-2xl lg:max-h-[65%] lg:shrink-0"
+        fullscreen ? "justify-center" : "panel rounded-2xl lg:h-full"
       }`}
     >
       <div
@@ -452,7 +452,7 @@ export function LecturePlayer({
               type="button"
               onClick={captureFrame}
               disabled={capturing}
-              title={source.kind === "youtube" ? "Choose this lecture tab when your browser asks what to share" : "Capture the paused video image"}
+              title="Ask about the paused video frame"
               className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-separator px-3 py-1.5 text-[12px] font-medium text-muted transition-colors hover:border-transparent hover:bg-fill hover:text-foreground disabled:opacity-50"
             >
               <svg viewBox="0 0 16 16" className="size-3.5" fill="none" aria-hidden="true">
@@ -464,7 +464,7 @@ export function LecturePlayer({
                 />
                 <circle cx="8" cy="8.5" r="2.25" stroke="currentColor" strokeWidth="1.25" />
               </svg>
-              {capturing ? "Capturing…" : "Capture frame"}
+              {capturing ? "Opening…" : "Ask"}
             </button>
           )}
         </div>

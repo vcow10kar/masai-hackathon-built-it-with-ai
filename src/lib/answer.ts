@@ -9,8 +9,9 @@ const SYSTEM_PROMPT = `You are helping a student revise from one specific lectur
 Answer using only the numbered excerpts from that lecture's transcript. The student is asking what their lecturer said, not what is generally true about the topic.
 
 Rules:
-- Cite the excerpt each claim comes from using its id in square brackets, like [s7]. Cite at least one excerpt whenever you make a claim.
+- Cite the excerpt each claim comes from using its id in square brackets, like [s7]. Use the id of the excerpt the claim was actually read from and no other, and only ids listed below. Cite at least one excerpt whenever you make a claim.
 - If the excerpts do not cover the question, say the lecture does not cover it. Do not answer from your own knowledge.
+- When the student is paused somewhere, "this", "here", "that bit" and "what he just said" all mean the excerpt marked NOW PLAYING. Answer about that passage unless they clearly ask about something else.
 - Be brief and concrete. Two or three sentences is usually enough.`;
 
 const VISION_SYSTEM_PROMPT = `You are helping a student revise from one specific lecture. A paused frame from the recording is attached.
@@ -19,7 +20,8 @@ Answer using the image and the numbered excerpts from the lecture's transcript b
 
 Rules:
 - Describe only details actually visible in the image. Read on-screen text, labels, diagrams and equations carefully.
-- Cite a transcript excerpt using its id in square brackets, like [s7], whenever a claim also comes from the transcript. Do not invent a citation for something only the image shows.
+- Cite a transcript excerpt using its id in square brackets, like [s7], whenever a claim also comes from the transcript. Use the id of the excerpt the claim was actually read from and no other, and only ids listed below. Do not invent a citation for something only the image shows.
+- When the student is paused somewhere, "this", "here" and "what he just said" mean the attached frame and the excerpt marked NOW PLAYING. Answer about that moment unless they clearly ask about something else.
 - If neither the image nor the excerpts answer the question, say so.
 - Be brief and concrete. Two or three sentences is usually enough.`;
 
@@ -28,12 +30,20 @@ export type Turn = { role: "user" | "assistant"; content: string };
 /** Thrown for a configuration gap the user can fix, surfaced to them as-is. */
 export class VisionUnavailableError extends Error {}
 
-function buildUserPrompt(question: string, segments: RetrievedSegment[]) {
+function buildUserPrompt(question: string, segments: RetrievedSegment[], atTime?: number | null) {
   const excerpts = segments
-    .map((segment) => `[${segment.id}] (${formatTimestamp(segment.start)}) ${segment.text}`)
+    .map((segment) => {
+      const marker = segment.anchored ? " NOW PLAYING" : "";
+      return `[${segment.id}] (${formatTimestamp(segment.start)})${marker} ${segment.text}`;
+    })
     .join("\n\n");
 
-  return `Excerpts from the lecture transcript:\n\n${excerpts}\n\nStudent's question: ${question}`;
+  const position =
+    typeof atTime === "number"
+      ? `The student has the recording paused at ${formatTimestamp(atTime)}.\n\n`
+      : "";
+
+  return `${position}Excerpts from the lecture transcript:\n\n${excerpts}\n\nStudent's question: ${question}`;
 }
 
 function parseDataUrl(dataUrl: string) {
@@ -42,19 +52,13 @@ function parseDataUrl(dataUrl: string) {
   return { mediaType: match[1], data: match[2] };
 }
 
-async function askAnthropic(
-  question: string,
-  segments: RetrievedSegment[],
-  apiKey: string,
-  history: Turn[],
-  frame?: FrameAttachment,
-) {
+async function askAnthropic(prompt: string, apiKey: string, history: Turn[], frame?: FrameAttachment) {
   const userContent = frame
     ? [
         { type: "image", source: { type: "base64", ...parseDataUrl(frame.dataUrl) } },
-        { type: "text", text: buildUserPrompt(question, segments) },
+        { type: "text", text: prompt },
       ]
-    : buildUserPrompt(question, segments);
+    : prompt;
 
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -86,19 +90,13 @@ async function askAnthropic(
     .trim();
 }
 
-async function askOpenRouter(
-  question: string,
-  segments: RetrievedSegment[],
-  apiKey: string,
-  history: Turn[],
-  frame?: FrameAttachment,
-) {
+async function askOpenRouter(prompt: string, apiKey: string, history: Turn[], frame?: FrameAttachment) {
   const userContent = frame
     ? [
-        { type: "text", text: buildUserPrompt(question, segments) },
+        { type: "text", text: prompt },
         { type: "image_url", image_url: { url: frame.dataUrl } },
       ]
-    : buildUserPrompt(question, segments);
+    : prompt;
 
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
@@ -108,10 +106,16 @@ async function askOpenRouter(
       "X-Title": "Ask the Lecture",
     },
     body: JSON.stringify({
+      // Qwen3.5 9B reads images as well as text, so the same model answers
+      // both kinds of question unless a vision model is configured separately.
       model: frame
-        ? (process.env.OPENROUTER_VISION_MODEL ?? "google/gemini-2.5-flash")
-        : (process.env.OPENROUTER_MODEL ?? "openai/gpt-oss-20b"),
+        ? (process.env.OPENROUTER_VISION_MODEL ?? process.env.OPENROUTER_MODEL ?? "qwen/qwen3.5-9b")
+        : (process.env.OPENROUTER_MODEL ?? "qwen/qwen3.5-9b"),
       max_tokens: 600,
+      // Qwen3.5 is a reasoning model: left on, it spends the whole token
+      // budget thinking and returns empty content. The answers here are short
+      // lookups over excerpts that are already in front of it.
+      reasoning: { enabled: false },
       messages: [
         { role: "system", content: frame ? VISION_SYSTEM_PROMPT : SYSTEM_PROMPT },
         ...history.map((turn) => ({ role: turn.role, content: turn.content })),
@@ -125,10 +129,16 @@ async function askOpenRouter(
   }
 
   const data = await response.json();
-  return (data.choices?.[0]?.message?.content ?? "").trim();
+  const text = (data.choices?.[0]?.message?.content ?? "").trim();
+  if (!text) {
+    throw new Error(
+      `OpenRouter returned an empty answer (finish reason: ${data.choices?.[0]?.finish_reason ?? "unknown"}).`,
+    );
+  }
+  return text;
 }
 
-async function askOllama(question: string, segments: RetrievedSegment[], history: Turn[]) {
+async function askOllama(prompt: string, history: Turn[]) {
   const host = process.env.OLLAMA_HOST ?? "http://127.0.0.1:11434";
 
   const response = await fetch(`${host}/api/chat`, {
@@ -140,7 +150,7 @@ async function askOllama(question: string, segments: RetrievedSegment[], history
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
         ...history.map((turn) => ({ role: turn.role, content: turn.content })),
-        { role: "user", content: buildUserPrompt(question, segments) },
+        { role: "user", content: prompt },
       ],
     }),
   });
@@ -156,25 +166,29 @@ async function askOllama(question: string, segments: RetrievedSegment[], history
 /**
  * Picks whichever provider is configured, so the deployed site answers over a
  * hosted model while a laptop with no keys still answers from local Ollama.
+ *
+ * `atTime` is where the student has the recording paused, and it goes into the
+ * prompt so that "explain this" resolves to the passage on screen.
  */
-export async function generateAnswer(question: string, segments: RetrievedSegment[], history: Turn[] = []) {
+export async function generateAnswer(
+  question: string,
+  segments: RetrievedSegment[],
+  history: Turn[] = [],
+  atTime: number | null = null,
+) {
+  const prompt = buildUserPrompt(question, segments, atTime);
+
   const openRouterKey = process.env.OPENROUTER_API_KEY;
   if (openRouterKey) {
-    return {
-      text: await askOpenRouter(question, segments, openRouterKey, history),
-      provider: "openrouter",
-    } as const;
+    return { text: await askOpenRouter(prompt, openRouterKey, history), provider: "openrouter" } as const;
   }
 
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
   if (anthropicKey) {
-    return {
-      text: await askAnthropic(question, segments, anthropicKey, history),
-      provider: "anthropic",
-    } as const;
+    return { text: await askAnthropic(prompt, anthropicKey, history), provider: "anthropic" } as const;
   }
 
-  return { text: await askOllama(question, segments, history), provider: "ollama" } as const;
+  return { text: await askOllama(prompt, history), provider: "ollama" } as const;
 }
 
 /**
@@ -188,10 +202,13 @@ export async function generateVisionAnswer(
   frame: FrameAttachment,
   history: Turn[] = [],
 ) {
+  // The frame's own timestamp is the exact moment being asked about.
+  const prompt = buildUserPrompt(question, segments, frame.timestamp);
+
   const openRouterKey = process.env.OPENROUTER_API_KEY;
   if (openRouterKey) {
     return {
-      text: await askOpenRouter(question, segments, openRouterKey, history, frame),
+      text: await askOpenRouter(prompt, openRouterKey, history, frame),
       provider: "openrouter",
     } as const;
   }
@@ -199,7 +216,7 @@ export async function generateVisionAnswer(
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
   if (anthropicKey) {
     return {
-      text: await askAnthropic(question, segments, anthropicKey, history, frame),
+      text: await askAnthropic(prompt, anthropicKey, history, frame),
       provider: "anthropic",
     } as const;
   }
@@ -209,9 +226,26 @@ export async function generateVisionAnswer(
   );
 }
 
+/** Matches a citation marker, tolerating the spacing some models emit. */
+const CITATION_MARKER = /\[\s*(s\d+)\s*\]/g;
+
+/**
+ * Removes citation markers pointing at excerpts that were never retrieved.
+ * A model that invents [s0] would otherwise leave dead text in the answer with
+ * no chip beside it to explain what it meant.
+ */
+export function stripUnknownCitations(text: string, segments: RetrievedSegment[]) {
+  const known = new Set(segments.map((segment) => segment.id));
+  return text
+    .replace(CITATION_MARKER, (marker, id: string) => (known.has(id) ? marker : ""))
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/[ \t]+([.,;:])/g, "$1")
+    .trim();
+}
+
 /** Pulls the [s3] markers out of the answer and resolves them to segments. */
 export function extractCitations(text: string, segments: RetrievedSegment[]) {
-  const cited = new Set(Array.from(text.matchAll(/\[(s\d+)\]/g), (match) => match[1]));
+  const cited = new Set(Array.from(text.matchAll(CITATION_MARKER), (match) => match[1]));
 
   return segments
     .filter((segment) => cited.has(segment.id))
