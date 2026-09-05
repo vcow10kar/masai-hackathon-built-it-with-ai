@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { extractCitations, generateAnswer } from "@/lib/answer";
-import { getLecture } from "@/lib/lectures";
+import { getLecture } from "@/lib/store";
 import { retrieve } from "@/lib/retrieval";
 
 // The local model can take a while to answer on a cold load.

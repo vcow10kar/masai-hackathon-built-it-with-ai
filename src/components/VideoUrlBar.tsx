@@ -2,12 +2,16 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { formatTimestamp } from "@/lib/format";
 import { parseVideoSource } from "@/lib/video-source";
+
+type StreamedSegment = { id: string; start: number; text: string };
 
 export function VideoUrlBar() {
   const router = useRouter();
   const [value, setValue] = useState("");
   const [status, setStatus] = useState<string | null>(null);
+  const [preview, setPreview] = useState<StreamedSegment[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -22,8 +26,9 @@ export function VideoUrlBar() {
     }
 
     setError(null);
+    setPreview([]);
     setPending(true);
-    setStatus("Fetching the transcript…");
+    setStatus("Starting");
 
     try {
       const response = await fetch("/api/ingest", {
@@ -32,15 +37,50 @@ export function VideoUrlBar() {
         body: JSON.stringify({ url: source.url }),
       });
 
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error ?? "Could not load that video.");
+      if (!response.ok || !response.body) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error ?? "Could not load that video.");
+      }
 
-      setStatus(data.reused ? "Already transcribed." : "Transcript ready.");
+      const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+      let buffer = "";
+      let lectureId: string | null = null;
+
+      // The route sends newline-delimited JSON, so each completed line can be
+      // shown the moment it arrives.
+      while (true) {
+        const { done, value: chunk } = await reader.read();
+        if (done) break;
+
+        buffer += chunk;
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const event = JSON.parse(line);
+
+          if (event.type === "status") setStatus(event.message);
+          else if (event.type === "segment") {
+            setPreview((current) => [...current.slice(-2), event]);
+          } else if (event.type === "done") {
+            lectureId = event.lectureId;
+            setStatus(event.reused ? "Already transcribed" : "Transcript ready");
+          } else if (event.type === "error") {
+            throw new Error(event.message);
+          }
+        }
+      }
+
+      if (!lectureId) throw new Error("The transcript did not finish.");
+
       setValue("");
-      router.push(`/?lecture=${data.lectureId}`);
+      setPreview([]);
+      router.push(`/?lecture=${lectureId}`);
       router.refresh();
     } catch (cause) {
       setStatus(null);
+      setPreview([]);
       setError(cause instanceof Error ? cause.message : "Could not load that video.");
     } finally {
       setPending(false);
@@ -73,8 +113,23 @@ export function VideoUrlBar() {
       </div>
 
       {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
+
       {!error && status && (
-        <p className="text-xs text-black/50 dark:text-white/50">{status}</p>
+        <p aria-live="polite" className="text-xs text-black/50 dark:text-white/50">
+          {status}
+          {pending && "…"}
+        </p>
+      )}
+
+      {preview.length > 0 && (
+        <ul className="flex flex-col gap-0.5 text-xs text-black/40 dark:text-white/40">
+          {preview.map((segment) => (
+            <li key={segment.id} className="truncate">
+              <span className="font-mono tabular-nums">{formatTimestamp(segment.start)}</span>{" "}
+              {segment.text}
+            </li>
+          ))}
+        </ul>
       )}
     </form>
   );

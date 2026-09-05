@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { LectureWorkspace, type WorkspaceLecture } from "@/components/LectureWorkspace";
-import { getLecture } from "@/lib/lectures";
+import { getLecture } from "@/lib/store";
 
 type Props = {
   searchParams: Promise<{ lecture?: string }>;

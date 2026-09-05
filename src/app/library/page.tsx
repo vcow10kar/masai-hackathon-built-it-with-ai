@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { formatTimestamp } from "@/lib/format";
-import { listLectures } from "@/lib/lectures";
+import { listLectures } from "@/lib/store";
 
 export const metadata = { title: "Library — Ask the Lecture" };
 
@@ -14,7 +14,11 @@ function coverage(covered: number, total: number) {
 }
 
 export default async function LibraryPage() {
-  const lectures = await listLectures();
+  const lectures = (await listLectures()).map((lecture) => ({
+    ...lecture,
+    segmentCount: lecture.segments.length,
+    coveredSeconds: lecture.segments[lecture.segments.length - 1]?.end ?? 0,
+  }));
 
   return (
     <div className="flex min-h-full flex-1 flex-col">
