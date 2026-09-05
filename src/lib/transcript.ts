@@ -59,8 +59,10 @@ function mergeSegments(
 
 /** Fetches captions over HTTP, which is the only path that works when deployed. */
 async function fetchHostedTranscript(videoId: string, apiKey: string) {
+  // Without an explicit language the service returns whichever track it likes,
+  // which on a multi-track video can be a translation rather than the speech.
   const response = await fetch(
-    `https://api.supadata.ai/v1/youtube/transcript?videoId=${videoId}&text=false`,
+    `https://api.supadata.ai/v1/youtube/transcript?videoId=${videoId}&text=false&lang=en`,
     { headers: { "x-api-key": apiKey } },
   );
 
@@ -69,6 +71,14 @@ async function fetchHostedTranscript(videoId: string, apiKey: string) {
   }
 
   const data = await response.json();
+
+  const language: string = data.lang ?? data.language ?? "";
+  if (language && !language.toLowerCase().startsWith("en")) {
+    throw new Error(
+      `No English transcript is available for this video (got "${language}").`,
+    );
+  }
+
   const content: Array<{ text?: string; offset?: number; duration?: number }> =
     data.content ?? data.transcript ?? [];
 
