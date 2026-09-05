@@ -121,11 +121,7 @@ export function SourcePanel({ lectureId, lectureTitle, storedSummary, transcript
       >
         {tab === "transcript" && transcript.length === 0 ? (
           <p className="p-3 text-[13px] leading-relaxed text-subtle">
-            No transcript loaded. Ingest one with{" "}
-            <code className="rounded bg-sunken px-1.5 py-0.5 font-mono text-[12px] text-accent-ink">
-              npm run ingest -- &lt;video url&gt;
-            </code>
-            , then open it from the library.
+            No transcript loaded.
           </p>
         ) : tab === "transcript" ? (
           <ul className="flex flex-col gap-0.5">
