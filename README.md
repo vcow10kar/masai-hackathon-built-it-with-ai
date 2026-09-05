@@ -56,6 +56,7 @@ Model ids are overridable with `OPENROUTER_MODEL`, `ANTHROPIC_MODEL` and
 | --- | --- |
 | Supadata transcript API | a YouTube link and `SUPADATA_API_KEY` is set. The only YouTube option that works when deployed. |
 | `yt-dlp` | a YouTube link and no key set. Needs the binary, so local only. |
+| Your own machine | a link with no captions and `TRANSCRIBE_URL` is set. Runs `npm run transcribe:server` here and reaches it through a tunnel. |
 | Deepgram (`nova-3`) | a link with no captions, such as a direct MP4, and `DEEPGRAM_API_KEY` is set. Deepgram fetches the URL itself, so the file never passes through the app. |
 | `whisper.cpp` (`ggml-small.en`) | a link with no captions and no Deepgram key. Local only. |
 
@@ -145,6 +146,24 @@ question instead of a silent failure. Direct same-origin video capture does
 not require tab sharing; YouTube region capture requires a compatible desktop
 browser and HTTPS or localhost. Browser/OS sharing permission is required for
 each capture.
+
+### Using this machine as the transcription server
+
+A deployment cannot run whisper.cpp, but it can call a machine that does.
+
+```bash
+npm run whisper:model small.en
+TRANSCRIBE_TOKEN=$(openssl rand -hex 32) npm run transcribe:server
+ngrok http 8787 --domain your-name.ngrok-free.app
+```
+
+Then set `TRANSCRIBE_URL` to the tunnel address plus `/transcribe`, and
+`TRANSCRIBE_TOKEN` to the same value, wherever the app runs. Measured on an
+M4: an 89 minute lecture took 193 seconds and about 1.4 GB of memory.
+
+The request stays open for the whole transcription, so a long recording can
+outlast a serverless function's time limit. Deepgram is the safer choice when
+that matters.
 
 ## Project layout
 
