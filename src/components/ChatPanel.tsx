@@ -17,7 +17,6 @@ type Props = {
   onSend: (question: string, frame?: FrameAttachment, newChat?: boolean) => void;
   onCitationClick: (citation: Citation) => void;
   onAddNote: (message: ChatMessage) => void;
-  addingNoteId: string | null;
 };
 
 /** Citations with no marker in the answer text, so nothing links to them yet. */
@@ -30,7 +29,7 @@ function trailingCitations(message: ChatMessage): Citation[] {
   );
 }
 
-export function ChatPanel({ chats, activeChatId, disabled, capturedFrame, onChatSelect, onNewChat, onFrameRemove, onSend, onCitationClick, onAddNote, addingNoteId }: Props) {
+export function ChatPanel({ chats, activeChatId, disabled, capturedFrame, onChatSelect, onNewChat, onFrameRemove, onSend, onCitationClick, onAddNote }: Props) {
   const [draft, setDraft] = useState("");
   const [frameDraft, setFrameDraft] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -131,13 +130,12 @@ export function ChatPanel({ chats, activeChatId, disabled, capturedFrame, onChat
                 <button
                   type="button"
                   onClick={() => onAddNote(message)}
-                  disabled={addingNoteId !== null}
-                  className="mt-2.5 inline-flex items-center gap-1.5 rounded-full border border-separator px-2.5 py-1 text-[11.5px] font-medium text-muted transition-colors hover:bg-fill hover:text-foreground disabled:opacity-50"
+                  className="mt-2.5 inline-flex items-center gap-1.5 rounded-full border border-separator px-2.5 py-1 text-[11.5px] font-medium text-muted transition-colors hover:bg-fill hover:text-foreground"
                 >
                   <svg viewBox="0 0 16 16" className="size-3.5" fill="none" aria-hidden="true">
                     <path d="M8 2.25 9.1 5.4 12.25 6.5 9.1 7.6 8 10.75 6.9 7.6 3.75 6.5 6.9 5.4 8 2.25Zm4.25 7.5.5 1.5 1.5.5-1.5.5-.5 1.5-.5-1.5-1.5-.5 1.5-.5.5-1.5Z" stroke="currentColor" strokeWidth="1.1" strokeLinejoin="round" />
                   </svg>
-                  {addingNoteId === message.id ? "Creating note…" : "Add to notes"}
+                  Add to notes
                 </button>
               )}
             </div>

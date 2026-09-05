@@ -44,6 +44,21 @@ Citing:
 - When the student is paused somewhere, "this", "here" and "what he just said" mean the attached frame and the passage marked NOW PLAYING. Explain that moment unless they clearly ask about something else.
 - If neither the image nor the transcript answers the question, say so.`;
 
+const OPENROUTER_MODEL = "openai/gpt-5.6-luna";
+const SUMMARY_MODEL = "openai/gpt-5.6-sol";
+
+const SUMMARY_SYSTEM_PROMPT = `Create a faithful study summary from one lecture transcript.
+
+Use only the transcript. Do not add outside facts or mention that you are reading a transcript.
+
+Format rules:
+- Return plain text, not Markdown or JSON.
+- Divide the summary into useful blocks separated by one blank line.
+- The first line of every block is a short heading. Start with Overview.
+- Put the block content on following lines. Use concise paragraphs, • bullets, or numbered steps.
+- Cover the central idea, key concepts, processes, examples, formulas, and conclusions that are actually present.
+- Prefer 5–8 blocks and keep the complete summary under 1,200 words.`;
+
 export type Turn = { role: "user" | "assistant"; content: string };
 
 /** Thrown for a configuration gap the user can fix, surfaced to them as-is. */
@@ -220,7 +235,13 @@ async function askAnthropic(prompt: string, apiKey: string, history: Turn[], fra
     .trim();
 }
 
-async function askOpenRouter(prompt: string, apiKey: string, history: Turn[], frame?: FrameAttachment) {
+async function askOpenRouter(
+  prompt: string,
+  apiKey: string,
+  history: Turn[],
+  frame?: FrameAttachment,
+  options: { model?: string; system?: string; maxTokens?: number } = {},
+) {
   const userContent = frame
     ? [
         { type: "text", text: prompt },
@@ -236,19 +257,19 @@ async function askOpenRouter(prompt: string, apiKey: string, history: Turn[], fr
       "X-Title": "Ask the Lecture",
     },
     body: JSON.stringify({
-      // gpt-oss is text-only, so a frame question needs a vision model even
-      // when the text answers come from gpt-oss.
-      model: frame
-        ? (process.env.OPENROUTER_VISION_MODEL ?? "qwen/qwen3.5-9b")
-        : (process.env.OPENROUTER_MODEL ?? "openai/gpt-oss-120b"),
-      max_tokens: ANSWER_TOKENS,
-      // gpt-oss and Qwen3.5 both reason before answering. Left unbounded they
-      // spend the whole budget thinking and return empty content; the whole
-      // transcript is already in front of them, so keep the pass short.
+      // OPENROUTER_MODEL lets a deployment answer with something else, which
+      // is how this one runs gpt-oss.
+      model: options.model ?? process.env.OPENROUTER_MODEL ?? OPENROUTER_MODEL,
+      max_tokens: options.maxTokens ?? 2048,
       reasoning: { effort: process.env.ANSWER_REASONING_EFFORT ?? "medium" },
+      // The transcript is in front of the model; invention is the failure to
+      // guard against, not dullness.
       temperature: Number(process.env.ANSWER_TEMPERATURE ?? 0.2),
       messages: [
-        { role: "system", content: frame ? VISION_SYSTEM_PROMPT : SYSTEM_PROMPT },
+        {
+          role: "system",
+          content: options.system ?? (frame ? VISION_SYSTEM_PROMPT : SYSTEM_PROMPT),
+        },
         ...history.map((turn) => ({ role: turn.role, content: turn.content })),
         { role: "user", content: userContent },
       ],
@@ -267,6 +288,28 @@ async function askOpenRouter(prompt: string, apiKey: string, history: Turn[], fr
     );
   }
   return text;
+}
+
+export async function generateSummary(
+  title: string,
+  segments: Array<{ start: number; text: string }>,
+) {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) {
+    throw new Error("AI summaries need OPENROUTER_API_KEY for GPT-5.6 Sol.");
+  }
+
+  const transcript = segments
+    .map((segment) => `[${formatTimestamp(segment.start)}] ${segment.text}`)
+    .join("\n");
+
+  return askOpenRouter(
+    `Lecture title: ${title}\n\nLecture transcript:\n${transcript}`,
+    apiKey,
+    [],
+    undefined,
+    { model: SUMMARY_MODEL, system: SUMMARY_SYSTEM_PROMPT, maxTokens: 3000 },
+  );
 }
 
 /**
@@ -375,14 +418,14 @@ export async function generateAnswer(
 ) {
   const prompt = buildUserPrompt(question, segments, { atTime, transcript });
 
-  const bridge = process.env.ANSWER_URL;
-  if (bridge) {
-    return { text: await askBridge(prompt, history, bridge), provider: "bridged" } as const;
-  }
-
   const openRouterKey = process.env.OPENROUTER_API_KEY;
   if (openRouterKey) {
     return { text: await askOpenRouter(prompt, openRouterKey, history), provider: "openrouter" } as const;
+  }
+
+  const bridge = process.env.ANSWER_URL;
+  if (bridge) {
+    return { text: await askBridge(prompt, history, bridge), provider: "bridged" } as const;
   }
 
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
