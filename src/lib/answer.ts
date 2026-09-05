@@ -48,6 +48,32 @@ async function askAnthropic(question: string, segments: RetrievedSegment[], apiK
     .trim();
 }
 
+async function askOpenRouter(question: string, segments: RetrievedSegment[], apiKey: string) {
+  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${apiKey}`,
+      "X-Title": "Ask the Lecture",
+    },
+    body: JSON.stringify({
+      model: process.env.OPENROUTER_MODEL ?? "openai/gpt-oss-20b",
+      max_tokens: 600,
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: buildUserPrompt(question, segments) },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`OpenRouter request failed (${response.status}): ${await response.text()}`);
+  }
+
+  const data = await response.json();
+  return (data.choices?.[0]?.message?.content ?? "").trim();
+}
+
 async function askOllama(question: string, segments: RetrievedSegment[]) {
   const host = process.env.OLLAMA_HOST ?? "http://127.0.0.1:11434";
 
@@ -73,16 +99,27 @@ async function askOllama(question: string, segments: RetrievedSegment[]) {
 }
 
 /**
- * Uses Anthropic when a key is configured so the deployed site works, and the
- * local Ollama model otherwise so the laptop build keeps working offline.
+ * Picks whichever provider is configured, so the deployed site answers over a
+ * hosted model while a laptop with no keys still answers from local Ollama.
  */
 export async function generateAnswer(question: string, segments: RetrievedSegment[]) {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  const text = apiKey
-    ? await askAnthropic(question, segments, apiKey)
-    : await askOllama(question, segments);
+  const openRouterKey = process.env.OPENROUTER_API_KEY;
+  if (openRouterKey) {
+    return {
+      text: await askOpenRouter(question, segments, openRouterKey),
+      provider: "openrouter",
+    } as const;
+  }
 
-  return { text, provider: apiKey ? "anthropic" : "ollama" } as const;
+  const anthropicKey = process.env.ANTHROPIC_API_KEY;
+  if (anthropicKey) {
+    return {
+      text: await askAnthropic(question, segments, anthropicKey),
+      provider: "anthropic",
+    } as const;
+  }
+
+  return { text: await askOllama(question, segments), provider: "ollama" } as const;
 }
 
 /** Pulls the [s3] markers out of the answer and resolves them to segments. */
