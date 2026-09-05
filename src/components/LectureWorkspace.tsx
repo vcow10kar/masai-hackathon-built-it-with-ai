@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  useEffect,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -11,12 +11,11 @@ import {
 import { ChatPanel } from "@/components/ChatPanel";
 import { LecturePlayer, type SeekRequest } from "@/components/LecturePlayer";
 import { SourcePanel, type SourceTab } from "@/components/SourcePanel";
-import { useStoredNotes } from "@/lib/local-notes";
+import { useStoredChats, useStoredNotes } from "@/lib/local-workspace";
 import { activeSegmentIndex } from "@/lib/segments";
 import { parseVideoSource, type VideoSource } from "@/lib/video-source";
 import type {
   ChatMessage,
-  ChatThread,
   Citation,
   FrameAttachment,
   LectureWorkspaceData,
@@ -45,20 +44,19 @@ const clampSplit = (value: number, size: number, before: number, after: number) 
 
 export function LectureWorkspace({ lecture, initialWorkspace, layout }: Props) {
   const source: VideoSource | null = lecture ? parseVideoSource(lecture.url) : null;
-  const firstChat = initialWorkspace.chats[0] ?? {
-    id: "chat-1",
-    title: "Chat 1",
-    messages: [],
-    pending: false,
-    error: null,
-  };
-  const [chats, setChats] = useState<ChatThread[]>(
-    initialWorkspace.chats.length ? initialWorkspace.chats : [firstChat],
+  // Chats and notes are this browser's own. Whatever the server still holds
+  // for this lecture seeds the shelf the first time it is opened here, so work
+  // from before they moved into the browser is not lost.
+  const seedChats = useMemo(
+    () =>
+      initialWorkspace.chats.length > 0
+        ? initialWorkspace.chats
+        : [{ id: "chat-1", title: "Chat 1", messages: [], pending: false, error: null }],
+    [initialWorkspace.chats],
   );
-  // Study notes are this browser's own; the AI summary now travels with the
-  // lecture rather than sitting among them.
-  const [notes, setNotes] = useStoredNotes(lecture?.id ?? null);
-  const [activeChatId, setActiveChatId] = useState(firstChat.id);
+  const [chats, setChats] = useStoredChats(lecture?.id ?? null, seedChats);
+  const [notes, setNotes] = useStoredNotes(lecture?.id ?? null, initialWorkspace.notes);
+  const [activeChatId, setActiveChatId] = useState(seedChats[0].id);
   const [sourceTab, setSourceTab] = useState<SourceTab>("transcript");
   const [seekRequest, setSeekRequest] = useState<SeekRequest | null>(null);
   const [currentTime, setCurrentTime] = useState<number | null>(null);
@@ -69,23 +67,6 @@ export function LectureWorkspace({ lecture, initialWorkspace, layout }: Props) {
   const videoStackRef = useRef<HTMLDivElement>(null);
 
   const transcript = lecture?.segments ?? [];
-
-  useEffect(() => {
-    if (!lecture) return;
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => {
-      void fetch(`/api/lectures/${lecture.id}/workspace`, {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ chats, notes }),
-        signal: controller.signal,
-      });
-    }, 350);
-    return () => {
-      window.clearTimeout(timeout);
-      controller.abort();
-    };
-  }, [chats, lecture, notes]);
 
   // The player reports its position several times a second; the transcript
   // only cares which segment is being spoken, so re-render when that changes.
@@ -115,6 +96,24 @@ export function LectureWorkspace({ lecture, initialWorkspace, layout }: Props) {
     if (citation.kind === "transcript") {
       seek(citation.start);
     }
+  }
+
+  /**
+   * Closing a chat removes it. The last one is replaced rather than left at
+   * none, so the panel always has somewhere to type.
+   */
+  function deleteChat(id: string) {
+    const remaining = chats.filter((chat) => chat.id !== id);
+
+    if (remaining.length === 0) {
+      const fresh = { id: crypto.randomUUID(), title: "Chat 1", messages: [], pending: false, error: null };
+      setChats([fresh]);
+      setActiveChatId(fresh.id);
+      return;
+    }
+
+    setChats(remaining);
+    if (id === activeChatId) setActiveChatId(remaining[remaining.length - 1].id);
   }
 
   function addChat() {
@@ -310,6 +309,7 @@ export function LectureWorkspace({ lecture, initialWorkspace, layout }: Props) {
       onSend={handleSend}
       onCitationClick={handleCitationClick}
       onAddNote={addToNotes}
+      onChatDelete={deleteChat}
     />
   );
 

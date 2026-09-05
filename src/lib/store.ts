@@ -195,29 +195,3 @@ export async function getLectureWorkspace(lectureId: string): Promise<LectureWor
   }
 }
 
-export async function saveLectureWorkspace(
-  lectureId: string,
-  workspace: LectureWorkspaceData,
-): Promise<void> {
-  if (!/^[\w-]+$/.test(lectureId)) throw new Error("Invalid lecture id.");
-  const saved = { chats: settledChats(workspace.chats), notes: workspace.notes };
-  const client = supabase();
-  if (client) {
-    const { error } = await client.from("lecture_workspaces").upsert({
-      lecture_id: lectureId,
-      ...saved,
-      updated_at: new Date().toISOString(),
-    });
-    if (!error) return;
-    if (error.code !== "PGRST205") {
-      throw new Error(`Supabase workspace write failed: ${error.message}`);
-    }
-  }
-
-  // ponytail: local fallback is not durable on serverless; apply supabase/schema.sql there.
-  await mkdir(WORKSPACE_DIR, { recursive: true });
-  await writeFile(
-    join(WORKSPACE_DIR, `${lectureId}.json`),
-    `${JSON.stringify(saved, null, 2)}\n`,
-  );
-}
