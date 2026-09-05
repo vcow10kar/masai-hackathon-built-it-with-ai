@@ -1,4 +1,10 @@
-import { getLecture, saveLecture } from "@/lib/store";
+import { generateSummary } from "@/lib/answer";
+import {
+  getLecture,
+  getLectureWorkspace,
+  saveLecture,
+  saveLectureWorkspace,
+} from "@/lib/store";
 import { buildLecture } from "@/lib/transcript";
 import { lectureIdFor, parseVideoSource } from "@/lib/video-source";
 
@@ -57,7 +63,20 @@ export async function POST(request: Request) {
   const body$ = stream(async (send) => {
     const existing = await getLecture(lectureIdFor(source));
     if (existing) {
-      send({ type: "status", message: "Already transcribed" });
+      const workspace = await getLectureWorkspace(existing.id);
+      if (!workspace.notes.some((note) => note.kind === "summary")) {
+        send({ type: "status", message: "Creating the AI summary with GPT Sol" });
+        const summary = await generateSummary(existing.title, existing.segments);
+        await saveLectureWorkspace(existing.id, {
+          ...workspace,
+          notes: [
+            { id: crypto.randomUUID(), heading: existing.title, body: summary, kind: "summary" },
+            ...workspace.notes,
+          ],
+        });
+      } else {
+        send({ type: "status", message: "Already transcribed and summarised" });
+      }
       send({ type: "done", lectureId: existing.id, title: existing.title, reused: true });
       return;
     }
@@ -70,8 +89,17 @@ export async function POST(request: Request) {
       send({ type: "segment", id: segment.id, start: segment.start, text: segment.text });
     }
 
-    send({ type: "status", message: "Saving the transcript" });
+    send({ type: "status", message: "Creating the AI summary with GPT Sol" });
+    const summary = await generateSummary(lecture.title, lecture.segments);
+
+    send({ type: "status", message: "Saving the lecture" });
     await saveLecture(lecture);
+    await saveLectureWorkspace(lecture.id, {
+      chats: [],
+      notes: [
+        { id: crypto.randomUUID(), heading: lecture.title, body: summary, kind: "summary" },
+      ],
+    });
 
     send({ type: "done", lectureId: lecture.id, title: lecture.title, reused: false });
   });

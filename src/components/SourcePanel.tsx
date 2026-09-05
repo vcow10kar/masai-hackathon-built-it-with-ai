@@ -5,7 +5,7 @@ import { formatTimestamp } from "@/lib/format";
 import { activeSegmentIndex } from "@/lib/segments";
 import type { NoteSection, TranscriptSegment } from "@/lib/types";
 
-export type SourceTab = "transcript" | "notes";
+export type SourceTab = "transcript" | "summary" | "notes";
 
 type Props = {
   transcript: TranscriptSegment[];
@@ -28,6 +28,8 @@ function opacityFor(distance: number) {
 
 export function SourcePanel({ transcript, notes, currentTime, onSeek, tab, onTabChange, onElaborate }: Props) {
   const [following, setFollowing] = useState(true);
+  const summary = notes.find((section) => section.kind === "summary");
+  const studyNotes = notes.filter((section) => section.kind !== "summary");
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const activeRef = useRef<HTMLLIElement>(null);
@@ -50,18 +52,23 @@ export function SourcePanel({ transcript, notes, currentTime, onSeek, tab, onTab
     <section className="panel flex h-full min-h-0 flex-col overflow-hidden rounded-2xl">
       <div className="flex shrink-0 items-center justify-between gap-3 border-b border-separator px-3 py-2.5">
         <div className="flex gap-0.5 rounded-[10px] bg-sunken p-0.5">
-          {(["transcript", "notes"] as const).map((value) => (
+          {(["transcript", "summary", "notes"] as const).map((value) => (
             <button
               key={value}
               type="button"
               onClick={() => onTabChange(value)}
               aria-current={tab === value}
-              className={`rounded-lg px-3.5 py-1 text-[13px] font-medium capitalize transition-all duration-200 ${
+              className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1 text-[13px] font-medium capitalize transition-all duration-200 ${
                 tab === value
                   ? "bg-segment text-foreground shadow-[0_1px_2px_rgba(0,0,0,0.18)]"
                   : "text-muted hover:text-foreground"
               }`}
             >
+              {value === "summary" && (
+                <svg viewBox="0 0 16 16" className="size-3.5" fill="none" aria-hidden="true">
+                  <path d="M8 2.25 9.1 5.4 12.25 6.5 9.1 7.6 8 10.75 6.9 7.6 3.75 6.5 6.9 5.4 8 2.25Zm4.25 7.5.5 1.5 1.5.5-1.5.5-.5 1.5-.5-1.5-1.5-.5 1.5-.5.5-1.5Z" stroke="currentColor" strokeWidth="1.1" strokeLinejoin="round" />
+                </svg>
+              )}
               {value}
             </button>
           ))}
@@ -156,13 +163,40 @@ export function SourcePanel({ transcript, notes, currentTime, onSeek, tab, onTab
               );
             })}
           </ul>
-        ) : notes.length === 0 ? (
+        ) : tab === "summary" ? (
+          summary ? (
+            <article className="mx-auto w-full max-w-[72ch] px-4 py-5 sm:px-6">
+              <h2 className="display text-balance text-[20px] leading-tight text-foreground">
+                {summary.heading}
+              </h2>
+              <div className="mt-5 space-y-6">
+                {summary.body.split(/\n\s*\n/).map((block, index) => {
+                  const [heading, ...content] = block.split("\n");
+                  return (
+                    <section key={`${heading}-${index}`}>
+                      <h3 className="border-b border-separator pb-2 text-[16px] font-semibold leading-snug text-foreground">
+                        {heading}
+                      </h3>
+                      <p className="mt-3 whitespace-pre-line text-[13.5px] leading-[1.75] text-muted">
+                        {content.join("\n")}
+                      </p>
+                    </section>
+                  );
+                })}
+              </div>
+            </article>
+          ) : (
+            <p className="p-3 text-[13px] leading-relaxed text-subtle">
+              Add this lecture again to generate its AI summary.
+            </p>
+          )
+        ) : studyNotes.length === 0 ? (
           <p className="p-3 text-[13px] leading-relaxed text-subtle">
             Notes you create from chat answers will appear here.
           </p>
         ) : (
           <ul className="flex flex-col gap-4 p-3">
-            {notes.map((section) => (
+            {studyNotes.map((section) => (
               <li key={section.id}>
                 <h3 className="overline text-foreground">{section.heading}</h3>
                 <p className="mt-1.5 text-[13.5px] leading-[1.6] text-muted">{section.body}</p>

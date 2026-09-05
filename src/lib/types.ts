@@ -10,6 +10,8 @@ export type NoteSection = {
   id: string;
   heading: string;
   body: string;
+  /** Generated summaries share the existing per-lecture workspace store. */
+  kind?: "note" | "summary";
 };
 
 export type Citation =

@@ -89,7 +89,9 @@ export async function POST(request: Request) {
   const retrieved = retrieve(lecture.segments, question, {
     atTime: frame ? frame.timestamp : atTime,
   });
-  if (!frame && retrieved.length === 0) {
+  // With the transcript in the prompt the model can still answer when keyword
+  // search matches nothing, so only bail when there is no lecture to read.
+  if (!frame && retrieved.length === 0 && lecture.segments.length === 0) {
     return NextResponse.json({
       answer: "I could not find anything about that in this lecture.",
       citations: [],
@@ -98,10 +100,12 @@ export async function POST(request: Request) {
 
   try {
     const { text, provider } = frame
-      ? await generateVisionAnswer(question, retrieved, frame, history)
-      : await generateAnswer(question, retrieved, history, atTime);
+      ? await generateVisionAnswer(question, retrieved, frame, history, lecture.segments)
+      : await generateAnswer(question, retrieved, history, atTime, lecture.segments);
 
-    const citations = extractCitations(text, retrieved);
+    // The model reads the whole transcript, so it can cite a passage keyword
+    // search did not rank. Resolve against the lecture, not the excerpts.
+    const citations = extractCitations(text, lecture.segments);
 
     // Asked about the moment on screen, models often answer without citing
     // anything, which leaves nothing to click. The passage at the playhead is
@@ -114,7 +118,7 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json({
-      answer: stripUnknownCitations(text, retrieved),
+      answer: stripUnknownCitations(text, lecture.segments),
       citations,
       provider,
     });

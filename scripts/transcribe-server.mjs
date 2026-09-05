@@ -136,7 +136,7 @@ const server = createServer(async (request, response) => {
       return send(400, { error: "Expected a JSON body" });
     }
 
-    const { system, prompt } = payload;
+    const { system, prompt, max_tokens: maxTokens, temperature } = payload;
     if (typeof prompt !== "string" || !prompt.trim()) {
       return send(400, { error: "prompt is required" });
     }
@@ -151,8 +151,15 @@ const server = createServer(async (request, response) => {
         body: JSON.stringify({
           model: ANSWER_MODEL,
           stream: false,
-          // Lecture answers should stick to the excerpts, not improvise.
-          options: { temperature: 0.2 },
+          // The caller sends the whole lecture transcript, so reasoning stays
+          // short and the context window has to be big enough to hold it.
+          think: process.env.ANSWER_THINK ?? "low",
+          // Lecture answers should stick to the transcript, not improvise.
+          options: {
+            temperature: typeof temperature === "number" ? temperature : 0.2,
+            num_ctx: Number(process.env.ANSWER_NUM_CTX ?? 16_384),
+            ...(typeof maxTokens === "number" ? { num_predict: maxTokens } : {}),
+          },
           messages: [
             ...(typeof system === "string" && system ? [{ role: "system", content: system }] : []),
             { role: "user", content: prompt },

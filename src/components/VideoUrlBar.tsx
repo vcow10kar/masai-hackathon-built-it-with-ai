@@ -74,7 +74,7 @@ export function VideoUrlBar({ lectures, activeLectureId, layout }: Props) {
             setPreview((current) => [...current.slice(-2), event]);
           } else if (event.type === "done") {
             lectureId = event.lectureId;
-            setStatus(event.reused ? "Already transcribed" : "Transcript ready");
+            setStatus(event.reused ? "Lecture ready" : "Transcript and AI summary ready");
           } else if (event.type === "error") {
             throw new Error(event.message);
           }

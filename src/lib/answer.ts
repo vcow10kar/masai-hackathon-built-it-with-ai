@@ -2,37 +2,129 @@ import "server-only";
 
 import { formatTimestamp } from "./format";
 import type { RetrievedSegment } from "./retrieval";
-import type { FrameAttachment } from "./types";
+import type { FrameAttachment, TranscriptSegment } from "./types";
 
-const SYSTEM_PROMPT = `You are helping a student revise from one specific lecture.
+const ANSWER_STYLE = `How to answer:
+- Write in simple, plain English, for someone meeting the idea for the first time. Short sentences, everyday words.
+- Say what the lecturer said, then put it in ordinary words. Explain a term the moment it is used.
+- Use the lecturer's own examples, numbers and wording. Do not swap in examples of your own.
+- Make no assumptions. If the transcript does not say something, do not fill the gap and do not guess what the lecturer meant. Say which part the lecture does not cover.
+- Add nothing from outside the transcript: no extra background, definitions, formulas or corrections.
+- The transcript is machine-generated and can mishear words. If a word looks garbled, say it is unclear rather than deciding what it should have been.
+- Be as long as the explanation needs and no longer. Usually a short paragraph; use a few short bullets for a sequence of steps.`;
 
-Answer using only the numbered excerpts from that lecture's transcript. The student is asking what their lecturer said, not what is generally true about the topic.
+const SYSTEM_PROMPT = `You are helping a student understand one specific lecture.
 
-Rules:
-- Cite the excerpt each claim comes from using its id in square brackets, like [s7]. Use the id of the excerpt the claim was actually read from and no other, and only ids listed below. Cite at least one excerpt whenever you make a claim.
-- If the excerpts do not cover the question, say the lecture does not cover it. Do not answer from your own knowledge.
-- When the student is paused somewhere, "this", "here", "that bit" and "what he just said" all mean the excerpt marked NOW PLAYING. Answer about that passage unless they clearly ask about something else.
-- Be brief and concrete. Two or three sentences is usually enough.`;
+Answer only from that lecture's transcript, given below as JSON plus a set of numbered excerpts. The student is asking what their lecturer actually said, not what is generally true about the topic.
 
-const VISION_SYSTEM_PROMPT = `You are helping a student revise from one specific lecture. A paused frame from the recording is attached.
+${ANSWER_STYLE}
 
-Answer using the image and the numbered excerpts from the lecture's transcript below. The student is asking what is shown or discussed at this moment, not what is generally true about the topic.
+Citing:
+- Cite the passage each claim comes from using its id in square brackets, like [s7]. Use the id of the passage the claim was actually read from and no other, and only ids that appear in the transcript below.
+- Every sentence that reports something from the lecture ends with a citation, including a sentence that restates an earlier point in easier words. If you cannot point to the passage a sentence came from, do not write that sentence.
+- If the transcript does not cover the question, say the lecture does not cover it. Do not answer from your own knowledge.
+- When the student is paused somewhere, "this", "here", "that bit" and "what he just said" all mean the passage marked NOW PLAYING. Explain that passage unless they clearly ask about something else.`;
 
-Rules:
-- Describe only details actually visible in the image. Read on-screen text, labels, diagrams and equations carefully.
-- Cite a transcript excerpt using its id in square brackets, like [s7], whenever a claim also comes from the transcript. Use the id of the excerpt the claim was actually read from and no other, and only ids listed below. Do not invent a citation for something only the image shows.
-- When the student is paused somewhere, "this", "here" and "what he just said" mean the attached frame and the excerpt marked NOW PLAYING. Answer about that moment unless they clearly ask about something else.
-- If neither the image nor the excerpts answer the question, say so.
-- Be brief and concrete. Two or three sentences is usually enough.`;
+const VISION_SYSTEM_PROMPT = `You are helping a student understand one specific lecture. A paused frame from the recording is attached.
+
+Answer using the image and the lecture transcript below. The student is asking what is shown or discussed at this moment, not what is generally true about the topic.
+
+${ANSWER_STYLE}
+- Describe only details actually visible in the image. Read on-screen text, labels, diagrams and equations carefully, and say when something is too small or blurred to read.
+
+Citing:
+- Cite a transcript passage using its id in square brackets, like [s7], whenever a claim also comes from the transcript. Use the id of the passage the claim was actually read from and no other. Do not invent a citation for something only the image shows.
+- When the student is paused somewhere, "this", "here" and "what he just said" mean the attached frame and the passage marked NOW PLAYING. Explain that moment unless they clearly ask about something else.
+- If neither the image nor the transcript answers the question, say so.`;
 
 const OPENROUTER_MODEL = "openai/gpt-5.6-luna";
+const SUMMARY_MODEL = "openai/gpt-5.6-sol";
+
+const SUMMARY_SYSTEM_PROMPT = `Create a faithful study summary from one lecture transcript.
+
+Use only the transcript. Do not add outside facts or mention that you are reading a transcript.
+
+Format rules:
+- Return plain text, not Markdown or JSON.
+- Divide the summary into useful blocks separated by one blank line.
+- The first line of every block is a short heading. Start with Overview.
+- Put the block content on following lines. Use concise paragraphs, • bullets, or numbered steps.
+- Cover the central idea, key concepts, processes, examples, formulas, and conclusions that are actually present.
+- Prefer 5–8 blocks and keep the complete summary under 1,200 words.`;
 
 export type Turn = { role: "user" | "assistant"; content: string };
 
 /** Thrown for a configuration gap the user can fix, surfaced to them as-is. */
 export class VisionUnavailableError extends Error {}
 
-function buildUserPrompt(question: string, segments: RetrievedSegment[], atTime?: number | null) {
+/**
+ * How much of the transcript JSON is allowed into the prompt, in characters.
+ * A 50-minute lecture is roughly 40k characters, which fits gpt-oss:20b's
+ * context alongside the answer; longer recordings get a window around the
+ * playhead instead of a silent truncation.
+ */
+const TRANSCRIPT_BUDGET = Number(process.env.ANSWER_TRANSCRIPT_BUDGET ?? 40_000);
+
+type PromptOptions = {
+  /** Where the student has the recording paused, in seconds. */
+  atTime?: number | null;
+  /** The whole lecture, so the model can read around the excerpts. */
+  transcript?: TranscriptSegment[];
+};
+
+function segmentJson(segment: TranscriptSegment) {
+  return JSON.stringify({
+    id: segment.id,
+    start: Number(segment.start.toFixed(2)),
+    end: Number(segment.end.toFixed(2)),
+    text: segment.text,
+  });
+}
+
+/**
+ * The transcript as JSON, centred on wherever the student is paused so that a
+ * lecture too long for the context window keeps the part being asked about.
+ * Returns the trimmed lines plus what was dropped, because the model has to be
+ * told what it cannot see rather than left to assume the lecture ends there.
+ */
+function transcriptWindow(transcript: TranscriptSegment[], atTime?: number | null) {
+  const lines = transcript.map(segmentJson);
+  const total = lines.reduce((sum, line) => sum + line.length + 1, 0);
+  if (total <= TRANSCRIPT_BUDGET) return { from: 0, to: transcript.length - 1, lines };
+
+  const centre =
+    typeof atTime === "number"
+      ? Math.max(0, transcript.findIndex((segment) => segment.end >= atTime))
+      : 0;
+
+  let from = centre;
+  let to = centre;
+  let used = lines[centre].length + 1;
+  // Grow outwards a passage at a time, alternating sides, so the window stays
+  // centred on the playhead rather than sliding towards whichever side has the
+  // shorter lines.
+  let forward = true;
+  while (from > 0 || to < transcript.length - 1) {
+    const canGoForward = to < transcript.length - 1;
+    const canGoBack = from > 0;
+    const goForward = forward ? canGoForward : !canGoBack;
+
+    const index = goForward ? to + 1 : from - 1;
+    const cost = lines[index].length + 1;
+    if (used + cost > TRANSCRIPT_BUDGET) break;
+
+    used += cost;
+    if (goForward) to += 1;
+    else from -= 1;
+    forward = !forward;
+  }
+
+  return { from, to, lines: lines.slice(from, to + 1) };
+}
+
+function buildUserPrompt(question: string, segments: RetrievedSegment[], options: PromptOptions = {}) {
+  const { atTime = null, transcript = [] } = options;
+
   const excerpts = segments
     .map((segment) => {
       const marker = segment.anchored ? " NOW PLAYING" : "";
@@ -45,7 +137,48 @@ function buildUserPrompt(question: string, segments: RetrievedSegment[], atTime?
       ? `The student has the recording paused at ${formatTimestamp(atTime)}.\n\n`
       : "";
 
-  return `${position}Excerpts from the lecture transcript:\n\n${excerpts}\n\nStudent's question: ${question}`;
+  // The whole transcript comes along as JSON so the model can follow a point
+  // the lecturer builds over several passages, instead of guessing at what
+  // sits either side of the excerpts keyword search happened to pick.
+  let transcriptBlock = "";
+  if (transcript.length > 0) {
+    const window = transcriptWindow(transcript, atTime);
+    const missingBefore = window.from > 0 ? window.from : 0;
+    const missingAfter =
+      window.to < transcript.length - 1 ? transcript.length - 1 - window.to : 0;
+
+    const notes = [
+      `This is the lecture transcript, one JSON object per spoken passage, in order. \`start\` and \`end\` are seconds into the recording.`,
+      missingBefore > 0 || missingAfter > 0
+        ? `This is part of the transcript, not all of it: ${missingBefore} passage(s) before and ${missingAfter} after are not shown. Do not assume anything about what they say.`
+        : `This is the complete transcript. Anything not in it was not said in this lecture.`,
+    ].join(" ");
+
+    transcriptBlock = `${notes}\n\n<transcript>\n${window.lines.join("\n")}\n</transcript>\n\n`;
+  }
+
+  const excerptBlock = excerpts
+    ? `The passages most likely to answer the question, pulled out of that transcript:\n\n${excerpts}\n\n`
+    : "";
+
+  return `${position}${transcriptBlock}${excerptBlock}Student's question: ${question}`;
+}
+
+/** Room for an explanation rather than a one-line lookup. */
+const ANSWER_TOKENS = Number(process.env.ANSWER_MAX_TOKENS ?? 900);
+
+/**
+ * gpt-oss answers in channels: a private `analysis` pass, then the reply on a
+ * `final` channel. A server that hands back the raw completion leaks the
+ * reasoning into the answer, so keep only what follows the final marker.
+ */
+function stripReasoning(text: string) {
+  const final = text.lastIndexOf("assistantfinal");
+  const trimmed = final === -1 ? text : text.slice(final + "assistantfinal".length);
+  return trimmed
+    .replace(/<\|(?:start|end|channel|message|return)\|>/g, "")
+    .replace(/<think>[\s\S]*?<\/think>/g, "")
+    .trim();
 }
 
 function parseDataUrl(dataUrl: string) {
@@ -71,7 +204,7 @@ async function askAnthropic(prompt: string, apiKey: string, history: Turn[], fra
     },
     body: JSON.stringify({
       model: process.env.ANTHROPIC_MODEL ?? "claude-sonnet-5",
-      max_tokens: 600,
+      max_tokens: ANSWER_TOKENS,
       system: frame ? VISION_SYSTEM_PROMPT : SYSTEM_PROMPT,
       messages: [
         ...history.map((turn) => ({ role: turn.role, content: turn.content })),
@@ -92,7 +225,13 @@ async function askAnthropic(prompt: string, apiKey: string, history: Turn[], fra
     .trim();
 }
 
-async function askOpenRouter(prompt: string, apiKey: string, history: Turn[], frame?: FrameAttachment) {
+async function askOpenRouter(
+  prompt: string,
+  apiKey: string,
+  history: Turn[],
+  frame?: FrameAttachment,
+  options: { model?: string; system?: string; maxTokens?: number } = {},
+) {
   const userContent = frame
     ? [
         { type: "text", text: prompt },
@@ -108,11 +247,14 @@ async function askOpenRouter(prompt: string, apiKey: string, history: Turn[], fr
       "X-Title": "Ask the Lecture",
     },
     body: JSON.stringify({
-      model: OPENROUTER_MODEL,
-      max_tokens: 2048,
+      model: options.model ?? OPENROUTER_MODEL,
+      max_tokens: options.maxTokens ?? 2048,
       reasoning: { effort: "medium" },
       messages: [
-        { role: "system", content: frame ? VISION_SYSTEM_PROMPT : SYSTEM_PROMPT },
+        {
+          role: "system",
+          content: options.system ?? (frame ? VISION_SYSTEM_PROMPT : SYSTEM_PROMPT),
+        },
         ...history.map((turn) => ({ role: turn.role, content: turn.content })),
         { role: "user", content: userContent },
       ],
@@ -124,13 +266,35 @@ async function askOpenRouter(prompt: string, apiKey: string, history: Turn[], fr
   }
 
   const data = await response.json();
-  const text = (data.choices?.[0]?.message?.content ?? "").trim();
+  const text = stripReasoning((data.choices?.[0]?.message?.content ?? "").trim());
   if (!text) {
     throw new Error(
       `OpenRouter returned an empty answer (finish reason: ${data.choices?.[0]?.finish_reason ?? "unknown"}).`,
     );
   }
   return text;
+}
+
+export async function generateSummary(
+  title: string,
+  segments: Array<{ start: number; text: string }>,
+) {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) {
+    throw new Error("AI summaries need OPENROUTER_API_KEY for GPT-5.6 Sol.");
+  }
+
+  const transcript = segments
+    .map((segment) => `[${formatTimestamp(segment.start)}] ${segment.text}`)
+    .join("\n");
+
+  return askOpenRouter(
+    `Lecture title: ${title}\n\nLecture transcript:\n${transcript}`,
+    apiKey,
+    [],
+    undefined,
+    { model: SUMMARY_MODEL, system: SUMMARY_SYSTEM_PROMPT, maxTokens: 3000 },
+  );
 }
 
 /**
@@ -157,6 +321,10 @@ async function askBridge(prompt: string, history: Turn[], endpoint: string) {
     body: JSON.stringify({
       system: SYSTEM_PROMPT,
       prompt: conversation ? `${conversation}\n\n${prompt}` : prompt,
+      max_tokens: ANSWER_TOKENS,
+      // The transcript is in front of the model; invention is the failure to
+      // guard against, not dullness.
+      temperature: Number(process.env.ANSWER_TEMPERATURE ?? 0.2),
     }),
     // A local model is slower than a hosted one.
     signal: AbortSignal.timeout(Number(process.env.ANSWER_TIMEOUT_MS ?? 300_000)),
@@ -167,7 +335,11 @@ async function askBridge(prompt: string, history: Turn[], endpoint: string) {
   }
 
   const data = await response.json();
-  return (data.text ?? "").trim();
+  const text = stripReasoning((data.text ?? "").trim());
+  if (!text) {
+    throw new Error("The answer server returned an empty answer.");
+  }
+  return text;
 }
 
 async function askOllama(prompt: string, history: Turn[]) {
@@ -179,12 +351,24 @@ async function askOllama(prompt: string, history: Turn[]) {
     body: JSON.stringify({
       model: process.env.OLLAMA_MODEL ?? "gpt-oss:20b",
       stream: false,
+      // gpt-oss reasons before answering. Keep it short: the transcript is
+      // already in the prompt, and a long private pass eats the context the
+      // transcript needs.
+      think: process.env.OLLAMA_THINK ?? "low",
+      options: {
+        // The whole transcript now travels in the prompt, so the default 4k
+        // window would silently drop the beginning of it.
+        num_ctx: Number(process.env.OLLAMA_NUM_CTX ?? 16_384),
+        num_predict: ANSWER_TOKENS,
+        temperature: Number(process.env.ANSWER_TEMPERATURE ?? 0.2),
+      },
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
         ...history.map((turn) => ({ role: turn.role, content: turn.content })),
         { role: "user", content: prompt },
       ],
     }),
+    signal: AbortSignal.timeout(Number(process.env.ANSWER_TIMEOUT_MS ?? 300_000)),
   });
 
   if (!response.ok) {
@@ -192,7 +376,13 @@ async function askOllama(prompt: string, history: Turn[]) {
   }
 
   const data = await response.json();
-  return (data.message?.content ?? "").trim();
+  const text = stripReasoning((data.message?.content ?? "").trim());
+  if (!text) {
+    throw new Error(
+      "Ollama returned an empty answer. gpt-oss spends its whole budget reasoning when the context window is too small for the transcript: raise OLLAMA_NUM_CTX or lower ANSWER_TRANSCRIPT_BUDGET.",
+    );
+  }
+  return text;
 }
 
 /**
@@ -200,15 +390,18 @@ async function askOllama(prompt: string, history: Turn[]) {
  * hosted model, and finally a local Ollama on this machine.
  *
  * `atTime` is where the student has the recording paused, and it goes into the
- * prompt so that "explain this" resolves to the passage on screen.
+ * prompt so that "explain this" resolves to the passage on screen. `transcript`
+ * is the whole lecture: the retrieved excerpts say where to look, the
+ * transcript lets the model read around them rather than infer the gaps.
  */
 export async function generateAnswer(
   question: string,
   segments: RetrievedSegment[],
   history: Turn[] = [],
   atTime: number | null = null,
+  transcript: TranscriptSegment[] = [],
 ) {
-  const prompt = buildUserPrompt(question, segments, atTime);
+  const prompt = buildUserPrompt(question, segments, { atTime, transcript });
 
   const openRouterKey = process.env.OPENROUTER_API_KEY;
   if (openRouterKey) {
@@ -238,9 +431,10 @@ export async function generateVisionAnswer(
   segments: RetrievedSegment[],
   frame: FrameAttachment,
   history: Turn[] = [],
+  transcript: TranscriptSegment[] = [],
 ) {
   // The frame's own timestamp is the exact moment being asked about.
-  const prompt = buildUserPrompt(question, segments, frame.timestamp);
+  const prompt = buildUserPrompt(question, segments, { atTime: frame.timestamp, transcript });
 
   const openRouterKey = process.env.OPENROUTER_API_KEY;
   if (openRouterKey) {
@@ -263,25 +457,32 @@ export async function generateVisionAnswer(
   );
 }
 
-/** Matches a citation marker, tolerating the spacing some models emit. */
-const CITATION_MARKER = /\[\s*(s\d+)\s*\]/g;
+/** Anything with an id and a place in the recording can be cited. */
+type Citable = Pick<TranscriptSegment, "id" | "start">;
 
 /**
- * Removes citation markers pointing at excerpts that were never retrieved.
+ * Matches a citation marker, tolerating the spacing some models emit and the
+ * fullwidth brackets gpt-oss reaches for when it has been reasoning in another
+ * script: 【s7】 has to resolve to the same chip as [s7].
+ */
+const CITATION_MARKER = /[[\u3010\uFF3B]\s*(s\d+)\s*[\]\u3011\uFF3D]/g;
+
+/**
+ * Removes citation markers pointing at passages that are not in this lecture.
  * A model that invents [s0] would otherwise leave dead text in the answer with
  * no chip beside it to explain what it meant.
  */
-export function stripUnknownCitations(text: string, segments: RetrievedSegment[]) {
+export function stripUnknownCitations(text: string, segments: Citable[]) {
   const known = new Set(segments.map((segment) => segment.id));
   return text
-    .replace(CITATION_MARKER, (marker, id: string) => (known.has(id) ? marker : ""))
+    .replace(CITATION_MARKER, (marker, id: string) => (known.has(id) ? `[${id}]` : ""))
     .replace(/[ \t]{2,}/g, " ")
     .replace(/[ \t]+([.,;:])/g, "$1")
     .trim();
 }
 
 /** Pulls the [s3] markers out of the answer and resolves them to segments. */
-export function extractCitations(text: string, segments: RetrievedSegment[]) {
+export function extractCitations(text: string, segments: Citable[]) {
   const cited = new Set(Array.from(text.matchAll(CITATION_MARKER), (match) => match[1]));
 
   return segments
