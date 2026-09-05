@@ -182,7 +182,7 @@ export function VideoUrlBar({ lectures, activeLectureId, layout }: Props) {
         className="flex h-9 shrink-0 items-center gap-1.5 rounded-lg px-3 text-[12px] font-semibold text-accent-ink transition-colors hover:bg-accent-wash"
       >
         <span className="text-lg font-light leading-none" aria-hidden="true">+</span>
-        New lecture
+          Add video link
       </button>
 
       <dialog

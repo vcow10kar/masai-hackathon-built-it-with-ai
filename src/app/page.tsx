@@ -4,9 +4,11 @@ import {
   type WorkspaceLayout,
   type WorkspaceLecture,
 } from "@/components/LectureWorkspace";
+import { LibraryDialog } from "@/components/LibraryDialog";
 import { LayoutPicker } from "@/components/LayoutPicker";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { VideoUrlBar } from "@/components/VideoUrlBar";
+import { formatTimestamp } from "@/lib/format";
 import { getLecture, getLectureWorkspace, listLectures } from "@/lib/store";
 
 type Props = {
@@ -45,21 +47,59 @@ export default async function Home({ searchParams }: Props) {
         />
         <div className="flex shrink-0 items-center gap-1">
           <LayoutPicker lectureId={lectureId} layout={workspaceLayout} />
-          <Link
-            href="/library"
-            className="rounded-full px-3 py-1 text-[13px] font-medium text-accent-ink transition-colors hover:bg-accent-wash"
-          >
-            Library
-          </Link>
+          <LibraryDialog />
           <ThemeToggle />
         </div>
       </header>
 
-      <LectureWorkspace
-        lecture={workspaceLecture}
-        initialWorkspace={workspace}
-        layout={workspaceLayout}
-      />
+      {workspaceLecture ? (
+        <LectureWorkspace
+          lecture={workspaceLecture}
+          initialWorkspace={workspace}
+          layout={workspaceLayout}
+        />
+      ) : (
+        <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-5 p-5">
+          <section className="panel rounded-2xl p-5">
+            <div className="flex items-baseline justify-between gap-4">
+              <div>
+                <h2 className="display text-[24px] leading-tight">Your library</h2>
+                <p className="mt-1 text-[13px] text-muted">Open a lecture to start watching and asking questions.</p>
+              </div>
+              <span className="shrink-0 text-[12px] text-subtle">{lectures.length} {lectures.length === 1 ? "lecture" : "lectures"}</span>
+            </div>
+
+            {lectures.length > 0 ? (
+              <ul className="mt-5 divide-y divide-separator">
+                {lectures.map((item) => (
+                  <li key={item.id} className="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
+                    <div className="min-w-0">
+                      <p className="truncate text-[14px] font-medium">{item.title}</p>
+                      <p className="mt-0.5 truncate text-[12px] text-subtle">
+                        {item.uploader} · {formatTimestamp(item.durationSeconds)}
+                      </p>
+                    </div>
+                    <Link
+                      href={`/?lecture=${item.id}&layout=${workspaceLayout}`}
+                      className="shrink-0 rounded-full bg-accent px-3.5 py-1.5 text-[12px] font-medium text-on-accent transition-colors hover:bg-accent-hover"
+                    >
+                      Open
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-5 rounded-xl bg-sunken px-4 py-5 text-[13px] text-muted">
+                Your saved lectures will appear here.
+              </p>
+            )}
+          </section>
+
+          <p className="text-center text-[13px] text-subtle">
+            Ready to study? Choose <span className="font-medium text-accent-ink">Add video link</span> above.
+          </p>
+        </main>
+      )}
     </div>
   );
 }

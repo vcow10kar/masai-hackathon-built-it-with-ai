@@ -10,12 +10,15 @@ export const metadata = { title: "Library — Ask the Lecture" };
 // lecture shows up without a rebuild.
 export const dynamic = "force-dynamic";
 
+type Props = { searchParams: Promise<{ embed?: string }> };
+
 function coverage(covered: number, total: number) {
   if (total <= 0) return null;
   return Math.min(100, Math.round((covered / total) * 100));
 }
 
-export default async function LibraryPage() {
+export default async function LibraryPage({ searchParams }: Props) {
+  const embedded = (await searchParams).embed === "1";
   const lectures = (await listLectures()).map((lecture) => ({
     ...lecture,
     segmentCount: lecture.segments.length,
@@ -24,18 +27,20 @@ export default async function LibraryPage() {
 
   return (
     <div className="flex min-h-full flex-1 flex-col">
-      <header className="sticky top-0 z-20 flex shrink-0 items-center justify-between gap-4 border-b border-separator bg-chrome px-5 py-2.5 backdrop-blur-xl backdrop-saturate-150">
-        <h1 className="display text-[20px] leading-none">Library</h1>
-        <div className="flex items-center gap-1">
-          <Link
-            href="/"
-            className="rounded-full px-3 py-1 text-[13px] font-medium text-accent-ink transition-colors hover:bg-accent-wash"
-          >
-            Back to lecture
-          </Link>
-          <ThemeToggle />
-        </div>
-      </header>
+      {!embedded && (
+        <header className="sticky top-0 z-20 flex shrink-0 items-center justify-between gap-4 border-b border-separator bg-chrome px-5 py-2.5 backdrop-blur-xl backdrop-saturate-150">
+          <h1 className="display text-[20px] leading-none">Library</h1>
+          <div className="flex items-center gap-1">
+            <Link
+              href="/"
+              className="rounded-full px-3 py-1 text-[13px] font-medium text-accent-ink transition-colors hover:bg-accent-wash"
+            >
+              Back to lecture
+            </Link>
+            <ThemeToggle />
+          </div>
+        </header>
+      )}
 
       <main className="mx-auto w-full max-w-3xl flex-1 p-5">
         {lectures.length === 0 ? (
@@ -96,6 +101,7 @@ export default async function LibraryPage() {
                   <div className="mt-4 flex items-center gap-4 text-[13px]">
                     <Link
                       href={`/?lecture=${lecture.id}`}
+                      target={embedded ? "_top" : undefined}
                       className="rounded-full bg-accent px-4 py-1.5 font-medium text-on-accent transition-colors hover:bg-accent-hover"
                     >
                       Open
