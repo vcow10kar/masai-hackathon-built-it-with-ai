@@ -48,6 +48,13 @@ Citing:
 
 const OPENROUTER_MODEL = "openai/gpt-5.6-luna";
 const SUMMARY_MODEL = "openai/gpt-5.6-sol";
+/**
+ * A question about a paused frame needs a model that reads images. This is not
+ * the same choice as the text model: a deployment answering text with
+ * gpt-oss-120b would otherwise send the screenshot there too, and OpenRouter
+ * turns that away with "No endpoints found that support image input".
+ */
+const VISION_MODEL = "openai/gpt-5.6-luna";
 
 const SUMMARY_SYSTEM_PROMPT = `Create a faithful study summary from one lecture transcript.
 
@@ -303,8 +310,13 @@ async function askOpenRouter(
     },
     body: JSON.stringify({
       // OPENROUTER_MODEL lets a deployment answer with something else, which
-      // is how this one runs gpt-oss.
-      model: options.model ?? process.env.OPENROUTER_MODEL ?? OPENROUTER_MODEL,
+      // is how this one runs gpt-oss. Frames follow their own setting, since
+      // the text model need not be one that reads images.
+      model:
+        options.model ??
+        (frame
+          ? (process.env.OPENROUTER_VISION_MODEL ?? VISION_MODEL)
+          : (process.env.OPENROUTER_MODEL ?? OPENROUTER_MODEL)),
       max_tokens: options.maxTokens ?? 2048,
       reasoning: { effort: process.env.ANSWER_REASONING_EFFORT ?? "medium" },
       // The transcript is in front of the model; invention is the failure to
