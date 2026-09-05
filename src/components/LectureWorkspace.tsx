@@ -2,7 +2,6 @@
 
 import {
   useEffect,
-  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -56,14 +55,9 @@ export function LectureWorkspace({ lecture, initialWorkspace, layout }: Props) {
   const [chats, setChats] = useState<ChatThread[]>(
     initialWorkspace.chats.length ? initialWorkspace.chats : [firstChat],
   );
-  // The summary is generated at ingest and lives with the lecture; the study
-  // notes are this browser's own.
-  const summaryNote = initialWorkspace.notes.find((note) => note.kind === "summary");
-  const [studyNotes, setStudyNotes] = useStoredNotes(lecture?.id ?? null);
-  const notes = useMemo(
-    () => (summaryNote ? [summaryNote, ...studyNotes] : studyNotes),
-    [summaryNote, studyNotes],
-  );
+  // Study notes are this browser's own; the AI summary now travels with the
+  // lecture rather than sitting among them.
+  const [notes, setNotes] = useStoredNotes(lecture?.id ?? null);
   const [activeChatId, setActiveChatId] = useState(firstChat.id);
   const [sourceTab, setSourceTab] = useState<SourceTab>("transcript");
   const [seekRequest, setSeekRequest] = useState<SeekRequest | null>(null);
@@ -290,7 +284,7 @@ export function LectureWorkspace({ lecture, initialWorkspace, layout }: Props) {
         .replace(/[“”"]/g, "")
         .slice(0, 80) || "Study note";
 
-    setStudyNotes((current) => [
+    setNotes((current) => [
       ...current,
       {
         id: crypto.randomUUID(),

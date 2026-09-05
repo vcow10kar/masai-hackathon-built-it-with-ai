@@ -27,10 +27,7 @@ function isNote(value: unknown): value is NoteSection {
   if (!value || typeof value !== "object") return false;
   const note = value as Partial<NoteSection>;
   return (
-    typeof note.id === "string" &&
-    typeof note.heading === "string" &&
-    typeof note.body === "string" &&
-    (note.kind === undefined || note.kind === "note" || note.kind === "summary")
+    typeof note.id === "string" && typeof note.heading === "string" && typeof note.body === "string"
   );
 }
 
