@@ -12,7 +12,9 @@ export function GET() {
       : process.env.DEEPGRAM_API_KEY
         ? "deepgram"
         : "local whisper.cpp",
-    answers: process.env.OPENROUTER_API_KEY
+    answers: process.env.ANSWER_URL
+      ? "bridged"
+      : process.env.OPENROUTER_API_KEY
       ? "openrouter"
       : process.env.ANTHROPIC_API_KEY
         ? "anthropic"
