@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { formatTimestamp } from "@/lib/format";
 import { activeSegmentIndex } from "@/lib/segments";
 import type { NoteSection, TranscriptSegment } from "@/lib/types";
+import { AnswerText } from "./AnswerText";
 
 export type SourceTab = "transcript" | "summary" | "notes";
 
@@ -199,7 +200,11 @@ export function SourcePanel({ transcript, notes, currentTime, onSeek, tab, onTab
             {studyNotes.map((section) => (
               <li key={section.id}>
                 <h3 className="overline text-foreground">{section.heading}</h3>
-                <p className="mt-1.5 text-[13.5px] leading-[1.6] text-muted">{section.body}</p>
+                {/* A note is an answer the student kept, so it carries the same
+                    bullets and paragraphs and is laid out the same way. */}
+                <div className="mt-1.5 text-[13.5px] leading-[1.6] text-muted">
+                  <AnswerText text={section.body} citations={[]} onCitationClick={() => {}} />
+                </div>
               </li>
             ))}
           </ul>
