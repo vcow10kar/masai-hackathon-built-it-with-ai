@@ -12,6 +12,7 @@ export default async function Home({ searchParams }: Props) {
 
   const workspaceLecture: WorkspaceLecture | null = lecture
     ? {
+        id: lecture.id,
         title: lecture.title,
         uploader: lecture.uploader,
         url: lecture.url,

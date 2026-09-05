@@ -10,6 +10,7 @@ import { parseVideoSource, type VideoSource } from "@/lib/video-source";
 import type { ChatMessage, Citation, TranscriptSegment } from "@/lib/types";
 
 export type WorkspaceLecture = {
+  id: string;
   title: string;
   uploader: string;
   url: string;
@@ -25,6 +26,8 @@ export function LectureWorkspace({ lecture }: Props) {
     lecture ? parseVideoSource(lecture.url) : null,
   );
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [seekRequest, setSeekRequest] = useState<SeekRequest | null>(null);
   const [activeSegmentId, setActiveSegmentId] = useState<string | null>(null);
 
@@ -43,23 +46,40 @@ export function LectureWorkspace({ lecture }: Props) {
     }
   }
 
-  // Placeholder until the retrieval route exists: cites the first segment so
-  // the answer-and-jump path can be exercised end to end.
-  function handleSend(question: string) {
-    const first = transcript[0];
+  async function handleSend(question: string) {
+    if (!lecture) return;
 
     setMessages((current) => [
       ...current,
       { id: `${Date.now()}-user`, role: "user", content: question },
-      {
-        id: `${Date.now()}-assistant`,
-        role: "assistant",
-        content: "Answers will appear here once retrieval is wired up.",
-        citations: first
-          ? [{ kind: "transcript", segmentId: first.id, start: first.start }]
-          : undefined,
-      },
     ]);
+    setError(null);
+    setPending(true);
+
+    try {
+      const response = await fetch("/api/ask", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ lectureId: lecture.id, question }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "Request failed.");
+
+      setMessages((current) => [
+        ...current,
+        {
+          id: `${Date.now()}-assistant`,
+          role: "assistant",
+          content: data.answer,
+          citations: data.citations,
+        },
+      ]);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not reach the answer service.");
+    } finally {
+      setPending(false);
+    }
   }
 
   return (
@@ -88,6 +108,9 @@ export function LectureWorkspace({ lecture }: Props) {
       <div className="min-h-96 lg:min-h-0">
         <ChatPanel
           messages={messages}
+          pending={pending}
+          disabled={lecture === null}
+          error={error}
           onSend={handleSend}
           onCitationClick={handleCitationClick}
         />

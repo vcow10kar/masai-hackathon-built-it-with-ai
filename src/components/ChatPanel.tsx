@@ -6,17 +6,27 @@ import type { ChatMessage, Citation } from "@/lib/types";
 
 type Props = {
   messages: ChatMessage[];
+  pending: boolean;
+  disabled: boolean;
+  error: string | null;
   onSend: (question: string) => void;
   onCitationClick: (citation: Citation) => void;
 };
 
-export function ChatPanel({ messages, onSend, onCitationClick }: Props) {
+export function ChatPanel({
+  messages,
+  pending,
+  disabled,
+  error,
+  onSend,
+  onCitationClick,
+}: Props) {
   const [draft, setDraft] = useState("");
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
     const question = draft.trim();
-    if (!question) return;
+    if (!question || pending || disabled) return;
     onSend(question);
     setDraft("");
   }
@@ -26,7 +36,9 @@ export function ChatPanel({ messages, onSend, onCitationClick }: Props) {
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
         {messages.length === 0 ? (
           <p className="text-sm text-black/50 dark:text-white/50">
-            Ask anything about this lecture. Answers link back to the moment they came from.
+            {disabled
+              ? "Open a lecture from the library to ask questions about it."
+              : "Ask anything about this lecture. Answers link back to the moment they came from."}
           </p>
         ) : (
           messages.map((message) => (
@@ -59,22 +71,29 @@ export function ChatPanel({ messages, onSend, onCitationClick }: Props) {
             </div>
           ))
         )}
+
+        {pending && (
+          <p className="text-sm text-black/50 dark:text-white/50">Reading the lecture…</p>
+        )}
+
+        {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
       </div>
 
       <form onSubmit={submit} className="flex shrink-0 gap-2 border-t border-black/10 p-2 dark:border-white/15">
         <input
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
-          placeholder="Ask about this lecture"
+          disabled={disabled || pending}
+          placeholder={disabled ? "No lecture loaded" : "Ask about this lecture"}
           aria-label="Ask about this lecture"
           className="min-w-0 flex-1 rounded border border-black/15 px-3 py-2 text-sm outline-none focus:border-black/40 dark:border-white/20 dark:focus:border-white/50"
         />
         <button
           type="submit"
           className="rounded bg-foreground px-4 py-2 text-sm font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-40"
-          disabled={draft.trim().length === 0}
+          disabled={draft.trim().length === 0 || pending || disabled}
         >
-          Ask
+          {pending ? "Asking…" : "Ask"}
         </button>
       </form>
     </section>
